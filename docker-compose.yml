@@ -1,0 +1,37 @@
+# Local development: Next.js + FastAPI with hot reload. No host Node/Python install required.
+#
+# Prerequisite: create apps/web/.env.local (copy firebase.web.env.sample and add Firebase keys).
+#
+#   docker compose up --build
+#
+# Web: http://localhost:3000  ·  API: http://localhost:8000/health
+
+services:
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - path: ./apps/web/.env.local
+        required: false
+    environment:
+      # Helps file watching when the app directory is bind-mounted (esp. Windows / Docker Desktop).
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/api:/app
+
+volumes:
+  web_node_modules:

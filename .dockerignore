@@ -1,0 +1,15 @@
+.git
+.github
+**/.next
+**/node_modules
+**/out
+**/dist
+**/__pycache__
+**/.venv
+**/*.pyc
+.env
+**/.env.local
+*.log
+Plan/*.pdf
+.cursor
+assets

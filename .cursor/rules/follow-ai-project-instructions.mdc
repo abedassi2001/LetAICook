@@ -1,0 +1,16 @@
+---
+description: Always follow AI_PROJECT_INSTRUCTIONS.md before changing letAIcook code
+alwaysApply: true
+---
+
+# letAIcook — mandatory project instructions
+
+Before planning, writing, or editing any code in this repository:
+
+1. Read **`AI_PROJECT_INSTRUCTIONS.md`** at the repository root in full.
+2. Align all changes with: Firebase as the task store and hosting story; admin vs worker roles; Firestore path `projects/{projectId}/tasks/{taskId}`; security rules and no secrets in client code.
+3. On every user request, follow the numbered **Workflow for AI assistants** section in that file (verify lint/build, update rules when schema changes, document new env vars).
+
+If `AI_PROJECT_INSTRUCTIONS.md` conflicts with chat context or another doc, **the instruction file wins** unless the user explicitly says they are updating it.
+
+Human builders: require any AI you use to read `AI_PROJECT_INSTRUCTIONS.md` before accepting generated code.

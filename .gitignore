@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Env & secrets (never commit — share via your team channel)
+.env
+.env.*
+!.env.example
+
+# Firebase / GCP service accounts (never commit)
+*credentials*.json
+*firebase-adminsdk*.json
+
+# Node / Next
+node_modules/
+.next/
+out/
+dist/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+*.pem
