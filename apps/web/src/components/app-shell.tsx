@@ -7,6 +7,7 @@ import { useState, type ReactNode } from "react";
 
 const nav = [
   { href: "/chat", label: "Planning", sub: "AI assistant" },
+  { href: "/system-designer", label: "System designer", sub: "Architecture & diagrams" },
   { href: "/tasks", label: "Tasks", sub: "Board" },
 ] as const;
 

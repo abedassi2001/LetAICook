@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { AppProviders } from "@/components/app-providers";
 import { FirebaseAnalytics } from "@/components/firebase-analytics";
 import { Geist, Geist_Mono } from "next/font/google";
+import "@/styles/reactflow.css";
 import "./globals.css";
 
 const geistSans = Geist({

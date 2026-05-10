@@ -1,6 +1,12 @@
 "use client";
 
 import { getPublicApiBaseUrl } from "@/lib/api-base";
+import {
+  PLANNING_CONTEXT_KEY,
+  PLANNING_PROJECT_DESCRIPTION_KEY,
+  PLANNING_SYNC_EVENT,
+  buildProjectDescriptionFromMessages,
+} from "@/lib/planning-sync";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type ChatRole = "user" | "assistant";
@@ -10,7 +16,7 @@ type ChatMessage = { role: ChatRole; content: string };
 const INTRO: ChatMessage = {
   role: "assistant",
   content:
-    "I can help you start a project and shape how work flows in letAIcook: milestones, first tasks for admins vs workers, cadence, and definition of done.\n\nDescribe what you’re building (or paste a rough idea). Later, dedicated APIs will serve architecture and flow diagrams—for now I can outline structures in text or suggest Mermaid you can render elsewhere.",
+    "I can help you start a project and shape how work flows in letAIcook: milestones, first tasks for admins vs workers, cadence, and definition of done.\n\nDescribe what you’re building (or paste a rough idea). Your messages are summarized into the **System Designer** project description automatically—open **System Designer** and press **Generate system design** to produce architecture JSON, diagrams, and graphs (same Gemini API key as this chat).",
 };
 
 export function PlanningChat() {
@@ -27,6 +33,17 @@ export function PlanningChat() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(PLANNING_CONTEXT_KEY, JSON.stringify(messages));
+      const desc = buildProjectDescriptionFromMessages(messages);
+      sessionStorage.setItem(PLANNING_PROJECT_DESCRIPTION_KEY, desc);
+      window.dispatchEvent(new Event(PLANNING_SYNC_EVENT));
+    } catch {
+      /* private mode / quota */
+    }
+  }, [messages]);
 
   function newConversation() {
     setMessages([INTRO]);

@@ -6,9 +6,15 @@ import os
 from typing import Literal
 
 import google.generativeai as genai
+from design_routes import router as design_router
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from google.api_core.exceptions import GoogleAPIError, ResourceExhausted
+from gemini_shared import (
+    google_api_key,
+    is_quota_exhausted,
+    plan_model_candidates,
+)
+from google.api_core.exceptions import GoogleAPIError
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="letAIcook API", version="0.1.0")
@@ -26,17 +32,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# gemini-2.0-flash is deprecated and often has no free-tier quota (limit: 0).
-# Prefer 2.5 Flash-Lite, then 2.5 Flash, then 3.1 Flash-Lite — see Gemini API model docs.
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
-DEFAULT_GEMINI_FALLBACKS = (
-    "gemini-2.5-flash",
-    "gemini-3.1-flash-lite",
-)
+app.include_router(design_router)
 
 PLANNING_SYSTEM_PROMPT = """You are letAIcook's planning assistant for software and product teams.
 
-Context: letAIcook uses Firebase (Firestore) for tasks under projects/{projectId}/tasks. Admins create and assign work; workers execute and mark tasks complete. Tasks have status (todo, in_progress, review, done, blocked), priority, due dates, and optional Jira issue keys. Diagrams and architecture visuals will be added later via separate APIs—mention that briefly when users ask for diagrams, and offer text-based outlines or Mermaid-style descriptions they can paste elsewhere until those APIs exist.
+Context: letAIcook uses Firebase (Firestore) for tasks under projects/{projectId}/tasks. Admins create and assign work; workers execute and mark tasks complete. Tasks have status (todo, in_progress, review, done, blocked), priority, due dates, and optional Jira issue keys. The **AI System Designer** (separate page) can turn this conversation into architecture diagrams and structured JSON when the user opens it — help them describe what they are building clearly so that handoff works well.
 
 Your job:
 - Help teams kick off a new project: discovery, scope, milestones, risks, and a sensible first slice of work.
@@ -64,39 +64,6 @@ class ChatPlanRequest(BaseModel):
 
 class ChatPlanResponse(BaseModel):
     message: str
-
-
-def _google_api_key() -> str | None:
-    return os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-
-
-def _plan_model_candidates() -> list[str]:
-    primary = (os.getenv("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL).strip()
-    raw = (os.getenv("GEMINI_MODEL_FALLBACKS") or "").strip()
-    if raw:
-        fallbacks = [m.strip() for m in raw.split(",") if m.strip()]
-    else:
-        fallbacks = list(DEFAULT_GEMINI_FALLBACKS)
-
-    seen: set[str] = set()
-    order: list[str] = []
-    for m in [primary, *fallbacks]:
-        if m and m not in seen:
-            seen.add(m)
-            order.append(m)
-    return order
-
-
-def _is_quota_exhausted(err: GoogleAPIError) -> bool:
-    if isinstance(err, ResourceExhausted):
-        return True
-    msg = str(err)
-    return (
-        "429" in msg
-        or "RESOURCE_EXHAUSTED" in msg
-        or "quota" in msg.lower()
-        or "exceeded" in msg.lower()
-    )
 
 
 def _run_plan_chat(
@@ -130,7 +97,7 @@ def health():
 @app.post("/chat/plan", response_model=ChatPlanResponse)
 def chat_plan(body: ChatPlanRequest):
     """Project planning and task-lifecycle advice via Gemini (API key on server only)."""
-    api_key = _google_api_key()
+    api_key = google_api_key()
     if not api_key:
         raise HTTPException(
             status_code=503,
@@ -156,7 +123,7 @@ def chat_plan(body: ChatPlanRequest):
         )
     user_content = body.messages[-1].content
 
-    candidates = _plan_model_candidates()
+    candidates = plan_model_candidates()
     last_error: GoogleAPIError | None = None
 
     for i, model_name in enumerate(candidates):
@@ -172,7 +139,7 @@ def chat_plan(body: ChatPlanRequest):
             raise
         except GoogleAPIError as e:
             last_error = e
-            if _is_quota_exhausted(e) and i < len(candidates) - 1:
+            if is_quota_exhausted(e) and i < len(candidates) - 1:
                 continue
             raise HTTPException(
                 status_code=502,

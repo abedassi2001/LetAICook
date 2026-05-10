@@ -29,6 +29,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // AI System Designer workspace: `users/{uid}/systemDesigns/{docId}` — see system-design-model.ts
+    match /users/{uid}/systemDesigns/{docId} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
     // Tasks: `projects/{projectId}/tasks/{taskId}` — see task-model.ts
     match /projects/{projectId}/tasks/{taskId} {
       allow read: if signedIn()

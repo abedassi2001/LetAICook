@@ -93,7 +93,7 @@ OpenAI API + Jira API
 
 **Current repo layout (scaffold):** product docs live in `Plan/`. Runnable code starts under `apps/`:
 
-- `apps/web` — Next.js UI (**Firestore task board** at `/tasks`, **planning chat** at `/chat`).
+- `apps/web` — Next.js UI (**Firestore task board** at `/tasks`, **planning chat** at `/chat`, **AI System Designer** at `/system-designer`).
 - `apps/api` — FastAPI (`GET /health`, `POST /chat/plan`, more integrations to follow).
 - `firebase/` — Firestore security rules + root `firebase.json` for the Firebase CLI.
 
@@ -115,7 +115,7 @@ docker compose up --build
 
 4. Open **http://localhost:3000** (tasks: **http://localhost:3000/tasks**). Optional API health check: **http://localhost:8000/health**.
 
-Source under `apps/web` and `apps/api` is **bind-mounted**; edits on the host reload inside the containers. `node_modules` for the web app lives in a Docker volume and is populated on first start via `npm ci`.
+Source under `apps/web` and `apps/api` is **bind-mounted**; edits on the host reload inside the containers. `node_modules` for the web app lives in a Docker **named volume**; the web entrypoint runs **`npm ci`** when `package-lock.json` changes (tracked via `.npm-install-stamp`). After pulling new dependencies, run **`docker compose up --build`** so the updated entrypoint runs. If you still see **“Module not found”**, run `docker compose down`, remove the Compose volume that backs **`web_node_modules`** (see `docker volume ls`, name ends with `_web_node_modules`), then `docker compose up --build` again.
 
 ### Useful commands
 
@@ -148,6 +148,18 @@ The **`/chat`** page calls the FastAPI endpoint **`POST /chat/plan`**, which use
 Optional: **`GEMINI_MODEL`** (default **`gemini-2.5-flash-lite`**). Avoid **`gemini-2.0-flash`** — it is deprecated and often reports **free-tier quota `limit: 0`**. If you still see **429 / quota** errors: enable **billing** on the Google Cloud project tied to your API key, create a **new** key under a fresh project, or set **`GEMINI_MODEL`** / **`GEMINI_MODEL_FALLBACKS`** in `apps/api/.env.local` (see [`apps/api/api.env.sample`](./apps/api/api.env.sample)). The API retries fallback models automatically when quota errors occur.
 
 **`CORS_ORIGINS`** is a comma-separated list; default allows `http://localhost:3000`.
+
+---
+
+# AI System Designer (`/system-designer`)
+
+The **`/system-designer`** page renders **only** from structured JSON: nested **`diagrams`** (Mermaid strings), **`relationships`** (or explicit **`react_flow_*`**), **`pages`**, **`backend_services`**, **`api_routes`**, **`database_schema`**, and tasks. Data comes from **`POST /design-project`**, **JSON import**, or Firestore history. Legacy flat diagram keys from older snapshots are normalized on load (see `apps/web/src/lib/system-design/normalize.ts`). It can use **planning chat context** automatically (messages are mirrored to `sessionStorage` from **`/chat`**).
+
+1. Ensure **`GOOGLE_API_KEY`** (or **`GEMINI_API_KEY`**) is set on the API — the same key powers planning chat and system design (see [`apps/api/api.env.sample`](./apps/api/api.env.sample)). Restart the API after changes.
+2. Deploy updated **Firestore rules** so `users/{uid}/systemDesigns/{docId}` is allowed for the signed-in user: `firebase deploy --only firestore:rules`.
+3. Open [http://localhost:3000/system-designer](http://localhost:3000/system-designer) after signing in.
+
+**API (FastAPI):** `POST /design-project`, `POST /design-project/jira-tasks`, `POST /design-project/pitch` — all use **Gemini** with the same **`GOOGLE_API_KEY`** / **`GEMINI_MODEL`** as **`POST /chat/plan`**. Planning chat messages can stream into the designer description (see `apps/web/src/lib/planning-sync.ts`).
 
 ---
 

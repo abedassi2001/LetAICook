@@ -38,6 +38,7 @@ These are the current repo conventions. If you change them, **update this file**
 | **Backend stub** | FastAPI in `apps/api` for logic that must **not** run in the browser (secrets, privileged APIs, webhooks). |
 | **Users in Firestore** | Profiles under `users/{uid}` with `role`: `admin` \| `worker` (see `user-model.ts`). Tied to Firebase Auth uid. |
 | **Tasks in Firestore** | Documents under `projects/{projectId}/tasks/{taskId}`. Demo project id: `DEMO_PROJECT_ID` in `task-model.ts`. |
+| **System Designer** | Workspace doc `users/{uid}/systemDesigns/workspace` — AI-generated snapshots + version history (`system-design-model.ts`). |
 | **Task fields** | `task-model.ts`: includes `publishedByUid`, `assigneeUid`, `dueAt`, `completedAt`, `completedByUid`, status, priority, times, `jiraIssueKey`. **Change types, UI, and `firebase/firestore.rules` together.** |
 | **Firebase config (web)** | `apps/web/.env.local` — copy from `apps/web/firebase.web.env.sample`. Never commit secrets. |
 | **Firestore rules** | `firebase/firestore.rules` + `firebase.json` at repo root. |
@@ -76,7 +77,7 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 
 1. Clone the repo and read this file plus the root **`README.md`**.
 2. Create **`apps/web/.env.local`** from **`apps/web/firebase.web.env.sample`** (fill `NEXT_PUBLIC_*` from the Firebase console). That file is **gitignored** — do not commit it or paste keys into issues/PRs.
-3. Run locally either **`docker compose up --build`** from the repo root (see README *Docker*) or **`cd apps/web && npm install && npm run dev`** (see README *Run the web app*). Tasks UI: **`/tasks`**.
+3. Run locally either **`docker compose up --build`** from the repo root (see README *Docker*) or **`cd apps/web && npm install && npm run dev`** (see README *Run the web app*). Tasks: **`/tasks`**; planning chat: **`/chat`**; AI System Designer: **`/system-designer`** (set **`GOOGLE_API_KEY`** / **`GEMINI_API_KEY`** on the API — same as planning; see README).
 
 ### Builder checklist
 
@@ -97,6 +98,9 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 | 2026-05-09 | **Quick start:** Section 6 now lists clone → `.env.local` → Docker or `npm run dev`; root `.gitignore` covers `.env.*` and common service-account filename patterns. |
 | 2026-05-10 | **`/chat`:** Next.js planning chat → FastAPI `POST /chat/plan` (Gemini / Google AI Studio). Secrets: `GOOGLE_API_KEY` or `GEMINI_API_KEY` in `apps/api` only; optional `GEMINI_MODEL`, `GEMINI_MODEL_FALLBACKS`, `NEXT_PUBLIC_API_BASE_URL`. Default model `gemini-2.5-flash-lite` (not deprecated `gemini-2.0-flash`). See README “AI planning chat”. |
 | 2026-05-10 | **UI:** Dark theme (black + green); `AuthProvider` in root layout; `/login` → default `/chat`; `/chat` and `/tasks` use shared sidebar shell; task board auth form removed (sign in on `/login`). |
+| 2026-05-10 | **AI System Designer:** `/system-designer` — FastAPI `POST /design-project` (Gemini JSON: same `GOOGLE_API_KEY` as `/chat/plan`; `diagrams`, `relationships`, `backend_services`, React Flow, etc.). Optional `POST /design-project/jira-tasks` and `/pitch` (Gemini). Client: `apps/web/src/lib/system-design/*`, `planning-sync.ts` (planning → description + live sync). Exports: PNG, JSON, Markdown. Persist in `users/{uid}/systemDesigns/workspace`. |
+| 2026-05-10 | **React Flow CSS:** `apps/web/src/styles/reactflow.css` is a vendored copy of `reactflow@11` `dist/style.css` (Turbopack often fails on package CSS subpath imports). Re-copy when upgrading `reactflow`. |
+| 2026-05-10 | **Docker web:** `apps/web/docker-entrypoint.sh` runs `npm ci` when `package-lock.json` changes (`.npm-install-stamp`) so the `web_node_modules` volume picks up new packages; rebuild web image after changing the entrypoint. |
 
 *(Append a one-line note here whenever this file or Firebase setup changes materially.)*
 
