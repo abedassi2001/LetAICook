@@ -9,6 +9,7 @@ const nav = [
   { href: "/chat", label: "Planning", sub: "AI assistant" },
   { href: "/system-designer", label: "System designer", sub: "Architecture & diagrams" },
   { href: "/tasks", label: "Tasks", sub: "Board" },
+  { href: "/settings", label: "Settings", sub: "Jira & Preferences" },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {

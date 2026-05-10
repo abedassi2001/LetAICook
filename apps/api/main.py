@@ -7,6 +7,7 @@ from typing import Literal
 
 import google.generativeai as genai
 from design_routes import router as design_router
+from jira_routes import router as jira_router
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from gemini_shared import (
