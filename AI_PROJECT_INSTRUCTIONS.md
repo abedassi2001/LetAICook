@@ -95,6 +95,8 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 | 2026-05-09 | `/tasks` uses **Firebase Auth** (email/password) + role-based **Firestore rules**. Profiles in `users/{uid}` (`admin` \| `worker`); tasks in `projects/demo-project/tasks` with `publishedByUid`, `assigneeUid`, `dueAt`, `completedAt`, `completedByUid`. First admin is promoted manually in Console (see README). |
 | 2026-05-09 | **Docker:** root `docker-compose.yml` runs `apps/web` (Next.js) and `apps/api` (FastAPI) for local dev; teammates need `apps/web/.env.local` + Docker. See README “Docker (team development)”. |
 | 2026-05-09 | **Quick start:** Section 6 now lists clone → `.env.local` → Docker or `npm run dev`; root `.gitignore` covers `.env.*` and common service-account filename patterns. |
+| 2026-05-10 | **`/chat`:** Next.js planning chat → FastAPI `POST /chat/plan` (Gemini / Google AI Studio). Secrets: `GOOGLE_API_KEY` or `GEMINI_API_KEY` in `apps/api` only; optional `GEMINI_MODEL`, `GEMINI_MODEL_FALLBACKS`, `NEXT_PUBLIC_API_BASE_URL`. Default model `gemini-2.5-flash-lite` (not deprecated `gemini-2.0-flash`). See README “AI planning chat”. |
+| 2026-05-10 | **UI:** Dark theme (black + green); `AuthProvider` in root layout; `/login` → default `/chat`; `/chat` and `/tasks` use shared sidebar shell; task board auth form removed (sign in on `/login`). |
 
 *(Append a one-line note here whenever this file or Firebase setup changes materially.)*
 

@@ -1,6 +1,6 @@
 import { DashboardLayout } from "@/components/dashboard-layout";
 
-export default function TasksLayout({
+export default function ChatLayout({
   children,
 }: {
   children: React.ReactNode;

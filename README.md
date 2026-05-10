@@ -9,7 +9,7 @@ AI-powered engineering execution and Jira coordination platform.
 
 1. **Clone** this repository.
 2. **Configure Firebase for the web app:** copy [`apps/web/firebase.web.env.sample`](./apps/web/firebase.web.env.sample) to **`apps/web/.env.local`** and fill in the `NEXT_PUBLIC_*` values from the Firebase console. This file is listed in **`.gitignore`** — never commit it or put real keys in the repo.
-3. **Start:** from the repo root run **`docker compose up --build`** (recommended; see [Docker (team development)](#docker-team-development)) *or* install Node.js, `cd apps/web`, `npm install`, `npm run dev`. Open [http://localhost:3000/tasks](http://localhost:3000/tasks) after the app is up.
+3. **Start:** from the repo root run **`docker compose up --build`** (recommended; see [Docker (team development)](#docker-team-development)) *or* install Node.js, `cd apps/web`, `npm install`, `npm run dev`. Open [http://localhost:3000](http://localhost:3000) → **Sign in** at [`/login`](http://localhost:3000/login) (defaults to planning chat at [`/chat`](http://localhost:3000/chat); task board at [`/tasks`](http://localhost:3000/tasks)). For **AI planning chat**, set **`GOOGLE_API_KEY`** on the API service (see [AI planning chat](#ai-planning-chat)).
 
 Firebase rules, first admin setup, and native (non-Docker) API commands are documented in the sections below.
 
@@ -89,12 +89,12 @@ PostgreSQL + Redis (planned for full product)
         ↓
 OpenAI API + Jira API
 
-**Current scaffold in this repo:** the **task board** and roles use **Firebase** (Firestore + Auth) per [`AI_PROJECT_INSTRUCTIONS.md`](./AI_PROJECT_INSTRUCTIONS.md). The FastAPI app is a stub today (`GET /health`); do not assume PostgreSQL/Redis are required to run the UI.
+**Current scaffold in this repo:** the **task board** and roles use **Firebase** (Firestore + Auth) per [`AI_PROJECT_INSTRUCTIONS.md`](./AI_PROJECT_INSTRUCTIONS.md). The FastAPI app exposes `GET /health` and **`POST /chat/plan`** (Gemini / Google AI Studio–backed planning assistant); do not assume PostgreSQL/Redis are required to run the UI.
 
 **Current repo layout (scaffold):** product docs live in `Plan/`. Runnable code starts under `apps/`:
 
-- `apps/web` — Next.js UI (includes a **Firestore task board** demo at `/tasks`).
-- `apps/api` — FastAPI stub (`GET /health`); orchestration services will grow here per the plan.
+- `apps/web` — Next.js UI (**Firestore task board** at `/tasks`, **planning chat** at `/chat`).
+- `apps/api` — FastAPI (`GET /health`, `POST /chat/plan`, more integrations to follow).
 - `firebase/` — Firestore security rules + root `firebase.json` for the Firebase CLI.
 
 ---
@@ -132,7 +132,22 @@ Deploying **Firestore rules** still uses the [Firebase CLI](https://firebase.goo
 
 ### Compose note
 
-`docker-compose.yml` uses `env_file` with `required: false` for `apps/web/.env.local` (Compose **v2.24+**). If `docker compose` errors on a missing env file, create `apps/web/.env.local` from the sample first.
+`docker-compose.yml` uses `env_file` with `required: false` for `apps/web/.env.local` (Compose **v2.24+**). If `docker compose` errors on a missing env file, create `apps/web/.env.local` from the sample first. The **API** service optionally loads **`apps/api/.env.local`** the same way (see [AI planning chat](#ai-planning-chat)).
+
+---
+
+# AI planning chat
+
+The **`/chat`** page calls the FastAPI endpoint **`POST /chat/plan`**, which uses the **Google Gemini** API (key from **[Google AI Studio](https://aistudio.google.com/)**). The key stays **only** on the server (`apps/api`), never in `NEXT_PUBLIC_*` variables.
+
+1. In [Google AI Studio](https://aistudio.google.com/), open **Get API key** and create/copy a key.
+2. In the repo, copy [`apps/api/api.env.sample`](./apps/api/api.env.sample) to **`apps/api/.env.local`** and set **`GOOGLE_API_KEY=`**_your key_ (this path is gitignored via `.env.*`). Alternatively you may use **`GEMINI_API_KEY`** if you prefer that name.
+3. Restart the API container or process so the variable is loaded (`docker compose up --build` after changing `.env.local`, or restart the `api` service).
+4. Open [http://localhost:3000/chat](http://localhost:3000/chat). The browser calls the API at **`NEXT_PUBLIC_API_BASE_URL`** if set (`apps/web/.env.local`), otherwise **`http://localhost:8000`**.
+
+Optional: **`GEMINI_MODEL`** (default **`gemini-2.5-flash-lite`**). Avoid **`gemini-2.0-flash`** — it is deprecated and often reports **free-tier quota `limit: 0`**. If you still see **429 / quota** errors: enable **billing** on the Google Cloud project tied to your API key, create a **new** key under a fresh project, or set **`GEMINI_MODEL`** / **`GEMINI_MODEL_FALLBACKS`** in `apps/api/.env.local` (see [`apps/api/api.env.sample`](./apps/api/api.env.sample)). The API retries fallback models automatically when quota errors occur.
+
+**`CORS_ORIGINS`** is a comma-separated list; default allows `http://localhost:3000`.
 
 ---
 
@@ -236,7 +251,8 @@ Then open [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health).
 - Alembic
 
 ## AI Layer
-- OpenAI API
+- Google Gemini API (planning chat via `apps/api`)
+- OpenAI API (roadmap / other services as the product grows)
 
 ## Infrastructure
 - Docker

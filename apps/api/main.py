@@ -1,10 +1,197 @@
-"""Minimal FastAPI service — full orchestration layer comes next (per Plan/README)."""
+"""letAIcook API — health checks and server-side integrations (Gemini, Jira, etc.)."""
 
-from fastapi import FastAPI
+from __future__ import annotations
+
+import os
+from typing import Literal
+
+import google.generativeai as genai
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from google.api_core.exceptions import GoogleAPIError, ResourceExhausted
+from pydantic import BaseModel, Field
 
 app = FastAPI(title="letAIcook API", version="0.1.0")
+
+_cors_origins = [
+    o.strip()
+    for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# gemini-2.0-flash is deprecated and often has no free-tier quota (limit: 0).
+# Prefer 2.5 Flash-Lite, then 2.5 Flash, then 3.1 Flash-Lite — see Gemini API model docs.
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_GEMINI_FALLBACKS = (
+    "gemini-2.5-flash",
+    "gemini-3.1-flash-lite",
+)
+
+PLANNING_SYSTEM_PROMPT = """You are letAIcook's planning assistant for software and product teams.
+
+Context: letAIcook uses Firebase (Firestore) for tasks under projects/{projectId}/tasks. Admins create and assign work; workers execute and mark tasks complete. Tasks have status (todo, in_progress, review, done, blocked), priority, due dates, and optional Jira issue keys. Diagrams and architecture visuals will be added later via separate APIs—mention that briefly when users ask for diagrams, and offer text-based outlines or Mermaid-style descriptions they can paste elsewhere until those APIs exist.
+
+Your job:
+- Help teams kick off a new project: discovery, scope, milestones, risks, and a sensible first slice of work.
+- Explain how to break work into tasks and keep them flowing from planning through delivery (who does what, cadence, definition of done).
+- Be concrete and actionable; use markdown headings and bullet lists when it helps.
+- If the user’s goal is vague, ask a short clarifying question before dumping a long plan.
+- Stay neutral on specific vendors unless the user names them; align recommendations with letAIcook’s admin/worker task model.
+
+Do not claim you created tasks in their Firebase project; you only advise. Do not ask for API keys or secrets."""
+
+
+class ChatMessageIn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=12000)
+
+
+class ChatPlanRequest(BaseModel):
+    messages: list[ChatMessageIn] = Field(
+        ...,
+        min_length=1,
+        max_length=40,
+        description="Conversation history; last message should be from the user.",
+    )
+
+
+class ChatPlanResponse(BaseModel):
+    message: str
+
+
+def _google_api_key() -> str | None:
+    return os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+
+
+def _plan_model_candidates() -> list[str]:
+    primary = (os.getenv("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL).strip()
+    raw = (os.getenv("GEMINI_MODEL_FALLBACKS") or "").strip()
+    if raw:
+        fallbacks = [m.strip() for m in raw.split(",") if m.strip()]
+    else:
+        fallbacks = list(DEFAULT_GEMINI_FALLBACKS)
+
+    seen: set[str] = set()
+    order: list[str] = []
+    for m in [primary, *fallbacks]:
+        if m and m not in seen:
+            seen.add(m)
+            order.append(m)
+    return order
+
+
+def _is_quota_exhausted(err: GoogleAPIError) -> bool:
+    if isinstance(err, ResourceExhausted):
+        return True
+    msg = str(err)
+    return (
+        "429" in msg
+        or "RESOURCE_EXHAUSTED" in msg
+        or "quota" in msg.lower()
+        or "exceeded" in msg.lower()
+    )
+
+
+def _run_plan_chat(
+    *,
+    api_key: str,
+    model_name: str,
+    history: list[dict[str, list[str]]],
+    user_content: str,
+) -> str:
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        model_name=model_name,
+        system_instruction=PLANNING_SYSTEM_PROMPT,
+    )
+    chat = model.start_chat(history=history)
+    response = chat.send_message(
+        user_content,
+        generation_config=genai.GenerationConfig(temperature=0.7),
+    )
+    text = response.text or ""
+    if not text.strip():
+        raise HTTPException(status_code=502, detail="Empty response from AI.")
+    return text
 
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "letAIcook-api"}
+
+
+@app.post("/chat/plan", response_model=ChatPlanResponse)
+def chat_plan(body: ChatPlanRequest):
+    """Project planning and task-lifecycle advice via Gemini (API key on server only)."""
+    api_key = _google_api_key()
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "AI is not configured: set GOOGLE_API_KEY (or GEMINI_API_KEY) on the API "
+                "service — use a key from Google AI Studio."
+            ),
+        )
+
+    if body.messages[-1].role != "user":
+        raise HTTPException(
+            status_code=400,
+            detail="Last message must be from the user.",
+        )
+
+    history: list[dict[str, list[str]]] = []
+    for m in body.messages[:-1]:
+        history.append(
+            {
+                "role": "user" if m.role == "user" else "model",
+                "parts": [m.content],
+            }
+        )
+    user_content = body.messages[-1].content
+
+    candidates = _plan_model_candidates()
+    last_error: GoogleAPIError | None = None
+
+    for i, model_name in enumerate(candidates):
+        try:
+            text = _run_plan_chat(
+                api_key=api_key,
+                model_name=model_name,
+                history=history,
+                user_content=user_content,
+            )
+            return ChatPlanResponse(message=text)
+        except HTTPException:
+            raise
+        except GoogleAPIError as e:
+            last_error = e
+            if _is_quota_exhausted(e) and i < len(candidates) - 1:
+                continue
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Upstream AI error ({model_name}): {e!s}. "
+                    f"Tried: {', '.join(candidates[: i + 1])}. "
+                    "Try GEMINI_MODEL / GEMINI_MODEL_FALLBACKS in apps/api/.env.local, "
+                    "enable billing for your Google Cloud project, or create a new API key project — "
+                    "see https://ai.google.dev/gemini-api/docs/rate-limits"
+                ),
+            ) from e
+
+    if last_error:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"All Gemini models exhausted quota ({', '.join(candidates)}): {last_error!s}. "
+                "Enable billing or use a project with free-tier access for these models."
+            ),
+        ) from last_error
+
+    raise HTTPException(status_code=502, detail="No Gemini model configured.")

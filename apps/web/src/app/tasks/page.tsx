@@ -1,36 +1,22 @@
-import Link from "next/link";
 import { TasksBoard } from "./tasks-board";
 
 export default function TasksPage() {
   return (
-    <div className="mx-auto max-w-3xl flex-1 px-4 py-10 sm:px-6">
-      <div className="mb-8 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm font-medium text-zinc-500">letAIcook</p>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Tasks (Firebase Auth + Firestore)
-          </h1>
-          <p className="mt-1 max-w-xl text-sm text-zinc-600 dark:text-zinc-400">
-            Admins publish tasks with optional due times and assign workers.
-            Workers see only their tasks and can mark them done. Data:{" "}
-            <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-900">
-              users/{"{uid}"}
-            </code>{" "}
-            and{" "}
-            <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-900">
+    <div className="min-h-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-3xl">
+        <header className="mb-8 border-b border-app-border pb-6">
+          <p className="text-xs font-medium uppercase tracking-wider text-app-accent">Tasks</p>
+          <h1 className="mt-1 text-xl font-semibold tracking-tight text-app-text">Task board</h1>
+          <p className="mt-2 max-w-xl text-sm text-app-muted">
+            Firestore:{" "}
+            <code className="rounded bg-app-elevated px-1.5 py-0.5 text-xs text-app-accent/90">
               projects/demo-project/tasks
             </code>
-            .
+            . Use the sidebar to return to planning chat.
           </p>
-        </div>
-        <Link
-          href="/"
-          className="text-sm font-medium text-zinc-700 underline-offset-4 hover:underline dark:text-zinc-300"
-        >
-          ← Home
-        </Link>
+        </header>
+        <TasksBoard />
       </div>
-      <TasksBoard />
     </div>
   );
 }

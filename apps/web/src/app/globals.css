@@ -1,26 +1,40 @@
 @import "tailwindcss";
 
+/* Dark console: near-black + modern green accents */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --app-bg: #030503;
+  --app-sidebar: #050805;
+  --app-elevated: #0a100c;
+  --app-border: #142818;
+  --app-text: #e6ebe8;
+  --app-muted: #7d8f82;
+  --app-accent: #34d399;
+  --app-accent-bright: #4ade80;
+  --app-accent-dim: #059669;
+  --app-on-accent: #031105;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-app-bg: var(--app-bg);
+  --color-app-sidebar: var(--app-sidebar);
+  --color-app-elevated: var(--app-elevated);
+  --color-app-border: var(--app-border);
+  --color-app-text: var(--app-text);
+  --color-app-muted: var(--app-muted);
+  --color-app-accent: var(--app-accent);
+  --color-app-accent-bright: var(--app-accent-bright);
+  --color-app-accent-dim: var(--app-accent-dim);
+  --color-app-on-accent: var(--app-on-accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }

@@ -1,6 +1,6 @@
 # Local development: Next.js + FastAPI with hot reload. No host Node/Python install required.
 #
-# Prerequisite: create apps/web/.env.local (copy firebase.web.env.sample and add Firebase keys).
+# Prerequisite: apps/web/.env.local (Firebase). For /chat: apps/api/.env.local with GOOGLE_API_KEY.
 #
 #   docker compose up --build
 #
@@ -30,6 +30,9 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    env_file:
+      - path: ./apps/api/.env.local
+        required: false
     volumes:
       - ./apps/api:/app
 
