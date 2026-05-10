@@ -24,11 +24,11 @@ import {
   where,
 } from "firebase/firestore";
 
-function tasksCollection() {
+function tasksCollection(teamId: string) {
   return collection(
     getFirestoreDb(),
     "projects",
-    DEMO_PROJECT_ID,
+    teamId || DEMO_PROJECT_ID,
     "tasks",
   );
 }
@@ -68,10 +68,11 @@ export function TasksBoard() {
   const uid = user?.uid ?? "";
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isAdmin || !profile?.teamId) return;
     const q = query(
       collection(getFirestoreDb(), USERS_COLLECTION),
       where("role", "==", "worker"),
+      where("teamId", "==", profile.teamId)
     );
     const unsub = onSnapshot(
       q,
@@ -109,7 +110,8 @@ export function TasksBoard() {
     queueMicrotask(() => {
       if (cancel.current) return;
       try {
-        const base = tasksCollection();
+        const teamId = profile?.teamId || DEMO_PROJECT_ID;
+        const base = tasksCollection(teamId);
         const q = isAdmin
           ? query(base, orderBy("updatedAt", "desc"))
           : query(base, where("assigneeUid", "==", uid));
@@ -163,7 +165,8 @@ export function TasksBoard() {
         ? Timestamp.fromDate(new Date(dueLocal))
         : null;
     const assignee = assigneeUid === "" ? null : assigneeUid;
-    await addDoc(tasksCollection(), {
+    const teamId = profile?.teamId || DEMO_PROJECT_ID;
+    await addDoc(tasksCollection(teamId), {
       title: title.trim(),
       description: "",
       status: "todo" satisfies TaskStatus,
@@ -186,10 +189,11 @@ export function TasksBoard() {
   }
 
   async function patchTask(id: string, patch: Record<string, unknown>) {
+    const teamId = profile?.teamId || DEMO_PROJECT_ID;
     const ref = doc(
       getFirestoreDb(),
       "projects",
-      DEMO_PROJECT_ID,
+      teamId,
       "tasks",
       id,
     );
@@ -200,10 +204,11 @@ export function TasksBoard() {
   }
 
   async function removeTask(id: string) {
+    const teamId = profile?.teamId || DEMO_PROJECT_ID;
     const ref = doc(
       getFirestoreDb(),
       "projects",
-      DEMO_PROJECT_ID,
+      teamId,
       "tasks",
       id,
     );
@@ -275,6 +280,15 @@ export function TasksBoard() {
       <p className="text-sm text-app-muted">
         Signed in as <span className="font-medium text-app-text">{profile.displayName}</span> ·{" "}
         <span className="capitalize text-app-accent">{profile.role}</span>
+        {profile.teamId ? (
+          <>
+            {" "}· Team: <span className="font-medium text-app-text">{profile.teamId}</span>
+          </>
+        ) : (
+          <>
+            {" "}· <span className="text-amber-500">No Team ID</span>
+          </>
+        )}
       </p>
 
       {isAdmin ? (

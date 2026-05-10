@@ -15,6 +15,8 @@ export type UserProfileDoc = {
   jiraEmail?: string;
   jiraApiToken?: string;
   jiraDefaultProject?: string;
+  // Team sharing
+  teamId?: string;
 };
 
 export const USERS_COLLECTION = "users";
