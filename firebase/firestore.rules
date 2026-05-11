@@ -32,6 +32,11 @@ service cloud.firestore {
       allow read, write: if signedIn() && request.auth.uid == uid;
     }
 
+    // Planning assistant chat: `users/{uid}/planningChat/{docId}` — see planning-chat-model.ts
+    match /users/{uid}/planningChat/{docId} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
     // Tasks: `projects/{projectId}/tasks/{taskId}` — see task-model.ts
     match /projects/{projectId}/tasks/{taskId} {
       allow read: if signedIn()
