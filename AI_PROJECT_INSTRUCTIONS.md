@@ -17,7 +17,7 @@ The app should support **visibility of project status** so the build stays coord
 
 **Primary data & hosting goal:** use **Firebase** (Firestore for tasks, user profiles, and system designer workspace data; Auth for sign-in) with the **project owner’s Firebase account**. Do not introduce a second database or hosting story for core task/designer data unless the product owner explicitly changes this document.
 
-**Planning chat persistence:** today, chat handoff uses **`sessionStorage`** (see `apps/web/src/lib/planning-sync.ts`). **Firestore-backed chat threads** are a planned improvement (see README / GitHub issues)—when added, update this file, rules, and the chat UI together.
+**Planning chat persistence:** `sessionStorage` for same-tab handoff to **System Designer** + **`users/{uid}/planningChat/current`** in Firestore when signed in (see `planning-sync.ts`, `planning-chat-model.ts`). Deploy rules after pull.
 
 ---
 
@@ -45,6 +45,7 @@ These are the current repo conventions. If you change them, **update this file**
 | **Tasks in Firestore** | Documents under `projects/{projectId}/tasks/{taskId}`. Demo project id: `DEMO_PROJECT_ID` in `task-model.ts`. |
 | **System Designer** | Workspace doc `users/{uid}/systemDesigns/workspace` — AI-generated snapshots + version history (`system-design-model.ts`). Client normalizes API/import JSON in `apps/web/src/lib/system-design/`. |
 | **Planning → Designer** | `apps/web/src/lib/planning-sync.ts` — user messages summarized for the designer description; custom event for live sync until the user edits the description field. |
+| **Planning chat (Firestore)** | `users/{uid}/planningChat/current` — message array + `updatedAt` (`planning-chat-model.ts`). |
 | **Task fields** | `task-model.ts`: includes `publishedByUid`, `assigneeUid`, `dueAt`, `completedAt`, `completedByUid`, status, priority, times, `jiraIssueKey`. **Change types, UI, and `firebase/firestore.rules` together.** |
 | **Firebase config (web)** | `apps/web/.env.local` — copy from `apps/web/firebase.web.env.sample`. Never commit secrets. |
 | **Firestore rules** | `firebase/firestore.rules` + `firebase.json` at repo root. **Teammates must deploy rules** after clone or rule changes: `firebase deploy --only firestore:rules`. |
@@ -110,6 +111,7 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 | 2026-05-10 | **React Flow CSS:** `apps/web/src/styles/reactflow.css` is a vendored copy of `reactflow@11` `dist/style.css` (Turbopack often fails on package CSS subpath imports). Re-copy when upgrading `reactflow`. |
 | 2026-05-10 | **Docker web:** `apps/web/docker-entrypoint.sh` runs `npm ci` when `package-lock.json` changes (`.npm-install-stamp`) so the `web_node_modules` volume picks up new packages; rebuild web image after changing the entrypoint. |
 | 2026-05-10 | **Docs refresh:** README and this file rewritten for **current** stack (Firebase + FastAPI + Gemini only); removed misleading references to PostgreSQL/Redis/OpenAI in the runnable app. **Troubleshooting:** “Missing or insufficient permissions” on designer/tasks → deploy `firebase/firestore.rules` to the same project as `NEXT_PUBLIC_FIREBASE_PROJECT_ID`. |
+| 2026-05-11 | **Planning chat:** Persists to **`users/{uid}/planningChat/current`** (signed-in) + **`sessionStorage`** keys in `planning-sync.ts` (hydrate on `/chat` so navigation does not overwrite history; session keys scoped by owner uid / `__anon__`). Update **`firebase/firestore.rules`** when deploying. |
 
 *(Append a one-line note here whenever this file or Firebase setup changes materially.)*
 

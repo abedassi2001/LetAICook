@@ -1,30 +1,117 @@
 "use client";
 
+import { useAuth } from "@/contexts/auth-context";
 import { getPublicApiBaseUrl } from "@/lib/api-base";
+import { getFirestoreDb } from "@/lib/firebase";
 import {
   PLANNING_CONTEXT_KEY,
   PLANNING_PROJECT_DESCRIPTION_KEY,
   PLANNING_SYNC_EVENT,
   buildProjectDescriptionFromMessages,
+  clearPlanningSessionStorage,
+  readPlanningSessionOwnerUid,
+  readPlanningSessionSavedAt,
+  writePlanningSessionOwnerUid,
+  writePlanningSessionSavedAt,
 } from "@/lib/planning-sync";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  PLANNING_CHAT_COLLECTION,
+  PLANNING_CHAT_DOC_ID,
+  PLANNING_INTRO_MESSAGE,
+  parsePlanningMessages,
+  readPlanningMessagesFromSession,
+  type PlanningChatMessage,
+} from "@/lib/planning-chat-model";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type ChatRole = "user" | "assistant";
-
-type ChatMessage = { role: ChatRole; content: string };
-
-const INTRO: ChatMessage = {
-  role: "assistant",
-  content:
-    "I can help you start a project and shape how work flows in letAIcook: milestones, first tasks for admins vs workers, cadence, and definition of done.\n\nDescribe what you’re building (or paste a rough idea). Your messages are summarized into the **System Designer** project description automatically—open **System Designer** and press **Generate system design** to produce architecture JSON, diagrams, and graphs (same Gemini API key as this chat).",
-};
+const FIRESTORE_DEBOUNCE_MS = 800;
 
 export function PlanningChat() {
-  const [messages, setMessages] = useState<ChatMessage[]>([INTRO]);
+  const { user } = useAuth();
+  const [messages, setMessages] = useState<PlanningChatMessage[] | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  const planningRef = useMemo(() => {
+    if (!user) return null;
+    return doc(
+      getFirestoreDb(),
+      "users",
+      user.uid,
+      PLANNING_CHAT_COLLECTION,
+      PLANNING_CHAT_DOC_ID,
+    );
+  }, [user]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrate() {
+      let sessionMsgs = readPlanningMessagesFromSession();
+      const sessionAt = readPlanningSessionSavedAt();
+      const ownerUid = readPlanningSessionOwnerUid();
+      if (user) {
+        const sessionOk =
+          !ownerUid ||
+          ownerUid === user.uid ||
+          ownerUid === "__anon__";
+        if (!sessionOk) {
+          sessionMsgs = null;
+        }
+      }
+
+      let chosen: PlanningChatMessage[] = sessionMsgs ?? [PLANNING_INTRO_MESSAGE];
+
+      if (user) {
+        const ref = doc(
+          getFirestoreDb(),
+          "users",
+          user.uid,
+          PLANNING_CHAT_COLLECTION,
+          PLANNING_CHAT_DOC_ID,
+        );
+        try {
+          const snap = await getDoc(ref);
+          if (cancelled) return;
+
+          if (snap.exists()) {
+            const data = snap.data();
+            const fsMsgs = parsePlanningMessages(data.messages);
+            const rawTs = data.updatedAt as { toMillis?: () => number } | undefined;
+            const fsMs = typeof rawTs?.toMillis === "function" ? rawTs.toMillis() : 0;
+
+            if (fsMsgs && fsMsgs.length > 0) {
+              if (sessionMsgs && sessionMsgs.length > 0 && sessionAt > fsMs) {
+                chosen = sessionMsgs;
+              } else {
+                chosen = fsMsgs;
+              }
+            } else if (sessionMsgs && sessionMsgs.length > 0) {
+              chosen = sessionMsgs;
+            }
+          } else if (sessionMsgs && sessionMsgs.length > 0) {
+            chosen = sessionMsgs;
+          }
+        } catch {
+          if (!cancelled) {
+            chosen = sessionMsgs ?? [PLANNING_INTRO_MESSAGE];
+          }
+        }
+      }
+
+      if (!cancelled) {
+        setMessages(chosen);
+      }
+    }
+
+    void hydrate();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -35,27 +122,58 @@ export function PlanningChat() {
   }, [messages, scrollToBottom]);
 
   useEffect(() => {
+    if (messages === null) return;
     try {
       sessionStorage.setItem(PLANNING_CONTEXT_KEY, JSON.stringify(messages));
+      writePlanningSessionSavedAt(Date.now());
+      if (user) {
+        writePlanningSessionOwnerUid(user.uid);
+      } else {
+        writePlanningSessionOwnerUid("__anon__");
+      }
       const desc = buildProjectDescriptionFromMessages(messages);
       sessionStorage.setItem(PLANNING_PROJECT_DESCRIPTION_KEY, desc);
       window.dispatchEvent(new Event(PLANNING_SYNC_EVENT));
     } catch {
       /* private mode / quota */
     }
-  }, [messages]);
+  }, [messages, user]);
+
+  useEffect(() => {
+    if (messages === null || !user || !planningRef) return;
+    const id = window.setTimeout(() => {
+      void setDoc(
+        planningRef,
+        {
+          ownerUid: user.uid,
+          messages,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }, FIRESTORE_DEBOUNCE_MS);
+    return () => window.clearTimeout(id);
+  }, [messages, user, planningRef]);
 
   function newConversation() {
-    setMessages([INTRO]);
+    clearPlanningSessionStorage();
+    setMessages([PLANNING_INTRO_MESSAGE]);
     setInput("");
     setError(null);
+    if (user && planningRef) {
+      void setDoc(planningRef, {
+        ownerUid: user.uid,
+        messages: [PLANNING_INTRO_MESSAGE],
+        updatedAt: serverTimestamp(),
+      });
+    }
   }
 
   async function send() {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text || sending || messages === null) return;
 
-    const nextHistory: ChatMessage[] = [...messages, { role: "user", content: text }];
+    const nextHistory: PlanningChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages(nextHistory);
     setInput("");
     setError(null);
@@ -87,14 +205,24 @@ export function PlanningChat() {
       const data = JSON.parse(raw) as { message: string };
       if (!data.message) throw new Error("Invalid response from API.");
 
-      setMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
+      setMessages((prev) =>
+        prev === null ? prev : [...prev, { role: "assistant", content: data.message }],
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
-      setMessages((prev) => prev.slice(0, -1));
+      setMessages((prev) => (prev === null ? prev : prev.slice(0, -1)));
       setInput(text);
     } finally {
       setSending(false);
     }
+  }
+
+  if (messages === null) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-app-bg px-4">
+        <p className="text-sm text-app-muted">Loading planning chat…</p>
+      </div>
+    );
   }
 
   return (
@@ -217,6 +345,12 @@ export function PlanningChat() {
         <p className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-app-muted">
           API: <span className="text-app-accent/80">{getPublicApiBaseUrl()}</span> · Requires{" "}
           <code className="rounded bg-app-elevated px-1 text-app-muted">GOOGLE_API_KEY</code> on the server
+          {user ? (
+            <>
+              {" "}
+              · Chat syncs to your account
+            </>
+          ) : null}
         </p>
       </div>
     </div>
