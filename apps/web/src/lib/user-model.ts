@@ -10,6 +10,13 @@ export type UserProfileDoc = {
   emailLower: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  // User-specific Jira credentials
+  jiraDomain?: string;
+  jiraEmail?: string;
+  jiraApiToken?: string;
+  jiraDefaultProject?: string;
+  // Team sharing
+  teamId?: string;
 };
 
 export const USERS_COLLECTION = "users";

@@ -33,7 +33,7 @@ type AuthState = {
 
 type AuthContextValue = AuthState & {
   signInEmail: (email: string, password: string) => Promise<void>;
-  signUpEmail: (email: string, password: string, displayName: string) => Promise<void>;
+  signUpEmail: (email: string, password: string, displayName: string, teamId: string, role: UserRole) => Promise<void>;
   signOutUser: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
@@ -102,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signUpEmail = useCallback(
-    async (email: string, password: string, displayName: string) => {
+    async (email: string, password: string, displayName: string, teamId: string, role: UserRole) => {
       setError(null);
       const auth = getFirebaseAuth();
       const cred = await createUserWithEmailAndPassword(
@@ -115,7 +115,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const now = serverTimestamp();
       await setDoc(ref, {
         displayName: displayName.trim() || email.trim(),
-        role: "worker" satisfies UserRole,
+        role,
+        teamId: teamId.trim(),
         emailLower: email.trim().toLowerCase(),
         createdAt: now,
         updatedAt: now,

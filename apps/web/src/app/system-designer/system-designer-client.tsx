@@ -63,7 +63,7 @@ function readPlanningContext():
 }
 
 export function SystemDesignerClient() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [tab, setTab] = useState<TabId>("overview");
   const [description, setDescription] = useState("");
   const [design, setDesign] = useState<SystemDesignRawSnapshot | null>(null);
@@ -239,6 +239,53 @@ export function SystemDesignerClient() {
     }
   }
 
+  async function pushToJira() {
+    if (!design || !design.tasks?.length) {
+      alert("No tasks generated to push.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const payload = {
+        issues: design.tasks.map((t: any) => ({
+          summary: t.title,
+          description: t.description,
+          issue_type: "Task",
+          priority: "Medium"
+        }))
+      };
+
+      const res = await fetch(`${getPublicApiBaseUrl()}/jira/issues/batch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Jira-Domain": profile?.jiraDomain || "",
+          "X-Jira-Email": profile?.jiraEmail || "",
+          "X-Jira-Token": profile?.jiraApiToken || "",
+          "X-Jira-Project": profile?.jiraDefaultProject || "",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const raw = await res.text();
+      if (!res.ok) {
+        let detail = raw;
+        try {
+          const j = JSON.parse(raw) as { detail?: string };
+          if (j.detail) detail = j.detail;
+        } catch { /* */ }
+        throw new Error(detail);
+      }
+      const data = JSON.parse(raw);
+      alert(`Successfully created ${data.created?.length || 0} Jira issues! Check your Jira board.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to push to Jira");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const showSkeleton = loading && !design;
   const d = blueprint;
 
@@ -334,6 +381,14 @@ export function SystemDesignerClient() {
               className="rounded-xl border border-white/15 px-4 py-2.5 text-sm text-app-muted hover:text-app-accent disabled:opacity-40"
             >
               Generate Jira tasks
+            </button>
+            <button
+              type="button"
+              disabled={loading || !design || !design.tasks?.length}
+              onClick={() => void pushToJira()}
+              className="rounded-xl border border-white/15 px-4 py-2.5 text-sm text-app-muted hover:text-green-400 disabled:opacity-40"
+            >
+              Push tasks to Jira
             </button>
             <button
               type="button"
