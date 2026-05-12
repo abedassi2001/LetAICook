@@ -1,6 +1,6 @@
 """DesignProjectResponse validation and legacy diagram merge (no Gemini)."""
 
-from design_routes import DesignProjectResponse
+from letaicook_api.routers.design import DesignProjectResponse
 
 
 def test_legacy_diagram_keys_lifted_into_diagrams():

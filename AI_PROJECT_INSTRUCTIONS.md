@@ -39,7 +39,7 @@ These are the current repo conventions. If you change them, **update this file**
 | Area | Convention |
 |------|------------|
 | **Web UI** | Next.js in `apps/web` (App Router, TypeScript). |
-| **Backend** | FastAPI in `apps/api` for logic that must **not** run in the browser (secrets, Gemini calls). |
+| **Backend** | FastAPI in `apps/api` (`letaicook_api` package: `routers/`, `services/`) for logic that must **not** run in the browser (secrets, Gemini calls). ASGI entry remains **`main:app`** for Docker and local `uvicorn`. |
 | **Server AI** | **Google Gemini** only in this repo: `GOOGLE_API_KEY` or `GEMINI_API_KEY` on `apps/api`; optional `GEMINI_MODEL`, `GEMINI_MODEL_FALLBACKS`. Used for `/chat/plan`, `/design-project`, and related endpoints. |
 | **Users in Firestore** | Profiles under `users/{uid}` with `role`: `admin` \| `worker` (see `user-model.ts`). Tied to Firebase Auth uid. |
 | **Tasks in Firestore** | Documents under `projects/{projectId}/tasks/{taskId}`. Demo project id: `DEMO_PROJECT_ID` in `task-model.ts`. |
@@ -49,7 +49,7 @@ These are the current repo conventions. If you change them, **update this file**
 | **Task fields** | `task-model.ts`: includes `publishedByUid`, `assigneeUid`, `dueAt`, `completedAt`, `completedByUid`, status, priority, times, `jiraIssueKey`. **Change types, UI, and `firebase/firestore.rules` together.** |
 | **Firebase config (web)** | `apps/web/.env.local` — copy from `apps/web/firebase.web.env.sample`. Never commit secrets. |
 | **Firestore rules** | `firebase/firestore.rules` + `firebase.json` at repo root. **Teammates must deploy rules** after clone or rule changes: `firebase deploy --only firestore:rules`. |
-| **Automated tests** | `apps/api`: **`pytest`** from `apps/api`; `apps/web`: **`npm run test`** (Vitest). No API keys required; Gemini mocked where needed. See root **README** (“Automated tests”). |
+| **Automated tests** | `apps/api`: **`pytest`** from `apps/api` (`tests/unit/`, `tests/integration/`); `apps/web`: **`npm run test`** (Vitest). No API keys required; Gemini mocked where needed. See root **README** (“Automated tests”). |
 | **Product / UML docs** | `Plan/` — use for roadmap and domain language; **implementation must still match this instruction file.** |
 
 ---
@@ -114,6 +114,7 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 | 2026-05-10 | **Docs refresh:** README and this file rewritten for **current** stack (Firebase + FastAPI + Gemini only); removed misleading references to PostgreSQL/Redis/OpenAI in the runnable app. **Troubleshooting:** “Missing or insufficient permissions” on designer/tasks → deploy `firebase/firestore.rules` to the same project as `NEXT_PUBLIC_FIREBASE_PROJECT_ID`. |
 | 2026-05-11 | **Planning chat:** Persists to **`users/{uid}/planningChat/current`** (signed-in) + **`sessionStorage`** keys in `planning-sync.ts` (hydrate on `/chat` so navigation does not overwrite history; session keys scoped by owner uid / `__anon__`). Update **`firebase/firestore.rules`** when deploying. |
 | 2026-05-12 | **Tests:** `apps/api`: **`pytest`** (health, `DesignProjectResponse`, `gemini_shared` mocks, `/design-project` with mocked Gemini). `apps/web`: **`npm run test`** (Vitest — `normalize.ts`, `planning-sync.ts`). No secrets required. See README “Automated tests”. |
+| 2026-05-12 | **API layout:** `apps/api/letaicook_api/` — `routers/` (per-area route modules), `services/gemini_shared.py`; root **`main.py`** re-exports `app` for `uvicorn main:app`. **`tests/unit/`** vs **`tests/integration/`** for pytest. **`app.include_router(jira)`** registers Jira routes (was imported but not mounted before). |
 
 *(Append a one-line note here whenever this file or Firebase setup changes materially.)*
 

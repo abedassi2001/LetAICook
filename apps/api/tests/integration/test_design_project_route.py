@@ -35,7 +35,10 @@ _MINIMAL_DESIGN = {
 def test_design_project_returns_validated_json(monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "mock")
     payload = json.dumps(_MINIMAL_DESIGN)
-    with patch("design_routes.generate_content_with_fallback", return_value=payload):
+    with patch(
+        "letaicook_api.routers.design.generate_content_with_fallback",
+        return_value=payload,
+    ):
         r = client.post(
             "/design-project",
             json={"description": "Build a task app"},
