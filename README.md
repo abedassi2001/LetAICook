@@ -35,7 +35,7 @@ letAIcook helps a team **stay aligned from idea to delivery**:
 | Path | Role |
 |------|------|
 | `apps/web` | Next.js (App Router, TypeScript, Tailwind). Routes: `/login`, `/chat`, `/system-designer`, `/tasks`. |
-| `apps/api` | FastAPI: `GET /health`, `POST /chat/plan`, `POST /design-project`, `POST /design-project/jira-tasks`, `POST /design-project/pitch`. |
+| `apps/api` | FastAPI (`uvicorn main:app`). Source package `letaicook_api/` — `routers/` (health, chat, design, Jira), `services/` (Gemini). Same HTTP routes as before. |
 | `firebase/` | `firestore.rules`, `firebase.json` — deploy with Firebase CLI. |
 | `Plan/` | Optional roadmap / domain notes (non-canonical vs `AI_PROJECT_INSTRUCTIONS.md`). |
 
@@ -171,7 +171,7 @@ Tests use **mocks** so you do not need `GOOGLE_API_KEY` or Firebase for them.
 
 | Where | Command | Notes |
 |-------|---------|--------|
-| **API** (`apps/api`) | `pytest` | From `apps/api` after `pip install -r requirements.txt`. Covers health, design JSON validation, Gemini helpers (mocked), and `/design-project` / `/chat/plan` without a real API key. |
+| **API** (`apps/api`) | `pytest` | From `apps/api` after `pip install -r requirements.txt`. **`tests/unit/`** — Pydantic design model, `gemini_shared` helpers (mocked). **`tests/integration/`** — `TestClient` for `/health`, `/chat/plan`, `/design-project` (no real API key). |
 | **Web** (`apps/web`) | `npm run test` | Vitest; `npm run test:watch` for watch mode. Covers `parseDesignJson`, `buildProjectDescriptionFromMessages`. |
 
 ### Firebase emulators (optional)

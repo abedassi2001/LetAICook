@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from google.api_core.exceptions import GoogleAPIError, ResourceExhausted
 
-import gemini_shared
+from letaicook_api.services import gemini_shared
 
 
 def test_google_api_key_prefers_google_then_gemini(monkeypatch: pytest.MonkeyPatch):
@@ -63,7 +63,7 @@ def test_generate_content_with_fallback_returns_text(monkeypatch: pytest.MonkeyP
     mock_resp.text = "  hello  "
     mock_model = MagicMock()
     mock_model.generate_content.return_value = mock_resp
-    with patch("gemini_shared.genai") as mock_genai:
+    with patch("letaicook_api.services.gemini_shared.genai") as mock_genai:
         mock_genai.GenerativeModel.return_value = mock_model
         out = gemini_shared.generate_content_with_fallback(
             system_instruction="sys",
@@ -90,7 +90,7 @@ def test_generate_content_with_fallback_retries_on_quota(monkeypatch: pytest.Mon
         ok,
     ]
 
-    with patch("gemini_shared.genai") as mock_genai:
+    with patch("letaicook_api.services.gemini_shared.genai") as mock_genai:
         mock_genai.GenerativeModel.return_value = mock_model
         out = gemini_shared.generate_content_with_fallback(
             system_instruction="s",

@@ -6,16 +6,17 @@ import json
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from gemini_shared import (
+from google.api_core.exceptions import GoogleAPIError
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from letaicook_api.services.gemini_shared import (
     GeminiNotConfiguredError,
     generate_content_with_fallback,
     google_api_key,
     plan_model_candidates,
 )
-from google.api_core.exceptions import GoogleAPIError
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-router = APIRouter()
+router = APIRouter(tags=["design"])
 
 DESIGN_JSON_INSTRUCTIONS = """
 You are a principal engineer and product designer. The product uses:
