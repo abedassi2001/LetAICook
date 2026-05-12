@@ -90,7 +90,7 @@ export function TasksBoard() {
       (e) => setError(e.message),
     );
     return () => unsub();
-  }, [isAdmin]);
+  }, [isAdmin, profile?.teamId]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;

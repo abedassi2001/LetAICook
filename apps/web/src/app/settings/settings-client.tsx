@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { getFirestoreDb } from "@/lib/firebase";
 import { USERS_COLLECTION } from "@/lib/user-model";
 import { doc, updateDoc } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 
 export function SettingsClient() {
   const { user, profile } = useAuth();
@@ -18,12 +18,13 @@ export function SettingsClient() {
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
-    if (profile) {
+    if (!profile) return;
+    startTransition(() => {
       setDomain(profile.jiraDomain || "");
       setEmail(profile.jiraEmail || "");
       setApiToken(profile.jiraApiToken || "");
       setDefaultProject(profile.jiraDefaultProject || "");
-    }
+    });
   }, [profile]);
 
   async function handleSaveJira(e: React.FormEvent) {

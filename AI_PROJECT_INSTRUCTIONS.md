@@ -49,6 +49,7 @@ These are the current repo conventions. If you change them, **update this file**
 | **Task fields** | `task-model.ts`: includes `publishedByUid`, `assigneeUid`, `dueAt`, `completedAt`, `completedByUid`, status, priority, times, `jiraIssueKey`. **Change types, UI, and `firebase/firestore.rules` together.** |
 | **Firebase config (web)** | `apps/web/.env.local` — copy from `apps/web/firebase.web.env.sample`. Never commit secrets. |
 | **Firestore rules** | `firebase/firestore.rules` + `firebase.json` at repo root. **Teammates must deploy rules** after clone or rule changes: `firebase deploy --only firestore:rules`. |
+| **Automated tests** | `apps/api`: **`pytest`** from `apps/api`; `apps/web`: **`npm run test`** (Vitest). No API keys required; Gemini mocked where needed. See root **README** (“Automated tests”). |
 | **Product / UML docs** | `Plan/` — use for roadmap and domain language; **implementation must still match this instruction file.** |
 
 ---
@@ -70,8 +71,8 @@ When the user asks to add or change something:
 3. **Implement the smallest change** that satisfies the request; match existing patterns in `apps/web` and `apps/api`.
 4. **If you touch Firestore shape or paths**, update `task-model.ts` (or equivalent), any affected UI, and `firebase/firestore.rules` in a consistent way.
 5. **Verify** before considering the task done:
-   - `apps/web`: `npm run lint` and `npm run build` when TS/React changed.
-   - `apps/api`: run or at least import-check if Python changed.
+   - `apps/web`: `npm run lint`, `npm run test`, and `npm run build` when TS/React changed.
+   - `apps/api`: `pytest` (from `apps/api`) when Python changed, or at least import-check.
 6. **Document** new env vars or setup steps in `README.md` **or** in this file’s “Changelog / setup notes” section below.
 
 If instructions are ambiguous, **ask** rather than inventing product behavior.
@@ -112,6 +113,7 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 | 2026-05-10 | **Docker web:** `apps/web/docker-entrypoint.sh` runs `npm ci` when `package-lock.json` changes (`.npm-install-stamp`) so the `web_node_modules` volume picks up new packages; rebuild web image after changing the entrypoint. |
 | 2026-05-10 | **Docs refresh:** README and this file rewritten for **current** stack (Firebase + FastAPI + Gemini only); removed misleading references to PostgreSQL/Redis/OpenAI in the runnable app. **Troubleshooting:** “Missing or insufficient permissions” on designer/tasks → deploy `firebase/firestore.rules` to the same project as `NEXT_PUBLIC_FIREBASE_PROJECT_ID`. |
 | 2026-05-11 | **Planning chat:** Persists to **`users/{uid}/planningChat/current`** (signed-in) + **`sessionStorage`** keys in `planning-sync.ts` (hydrate on `/chat` so navigation does not overwrite history; session keys scoped by owner uid / `__anon__`). Update **`firebase/firestore.rules`** when deploying. |
+| 2026-05-12 | **Tests:** `apps/api`: **`pytest`** (health, `DesignProjectResponse`, `gemini_shared` mocks, `/design-project` with mocked Gemini). `apps/web`: **`npm run test`** (Vitest — `normalize.ts`, `planning-sync.ts`). No secrets required. See README “Automated tests”. |
 
 *(Append a one-line note here whenever this file or Firebase setup changes materially.)*
 

@@ -165,6 +165,15 @@ cd apps/web && npm install && npm run dev
 cd apps/api && python -m venv .venv && .venv\Scripts\activate && pip install -r requirements.txt && uvicorn main:app --reload --port 8000
 ```
 
+### Automated tests
+
+Tests use **mocks** so you do not need `GOOGLE_API_KEY` or Firebase for them.
+
+| Where | Command | Notes |
+|-------|---------|--------|
+| **API** (`apps/api`) | `pytest` | From `apps/api` after `pip install -r requirements.txt`. Covers health, design JSON validation, Gemini helpers (mocked), and `/design-project` / `/chat/plan` without a real API key. |
+| **Web** (`apps/web`) | `npm run test` | Vitest; `npm run test:watch` for watch mode. Covers `parseDesignJson`, `buildProjectDescriptionFromMessages`. |
+
 ### Firebase emulators (optional)
 
 `firebase emulators:start --only firestore,auth` — set `NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true` in `apps/web/.env.local` per `firebase.ts`.

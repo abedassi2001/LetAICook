@@ -240,7 +240,12 @@ export function SystemDesignerClient() {
   }
 
   async function pushToJira() {
-    if (!design || !design.tasks?.length) {
+    if (!design) {
+      alert("No tasks generated to push.");
+      return;
+    }
+    const rawTasks = design.tasks;
+    if (!Array.isArray(rawTasks) || rawTasks.length === 0) {
       alert("No tasks generated to push.");
       return;
     }
@@ -248,12 +253,15 @@ export function SystemDesignerClient() {
     setError(null);
     try {
       const payload = {
-        issues: design.tasks.map((t: any) => ({
-          summary: t.title,
-          description: t.description,
-          issue_type: "Task",
-          priority: "Medium"
-        }))
+        issues: rawTasks.map((t) => {
+          const row = t as { title?: unknown; description?: unknown };
+          return {
+            summary: typeof row.title === "string" ? row.title : "",
+            description: typeof row.description === "string" ? row.description : "",
+            issue_type: "Task",
+            priority: "Medium",
+          };
+        }),
       };
 
       const res = await fetch(`${getPublicApiBaseUrl()}/jira/issues/batch`, {
@@ -384,7 +392,12 @@ export function SystemDesignerClient() {
             </button>
             <button
               type="button"
-              disabled={loading || !design || !design.tasks?.length}
+              disabled={
+                loading ||
+                !design ||
+                !Array.isArray(design.tasks) ||
+                design.tasks.length === 0
+              }
               onClick={() => void pushToJira()}
               className="rounded-xl border border-white/15 px-4 py-2.5 text-sm text-app-muted hover:text-green-400 disabled:opacity-40"
             >
