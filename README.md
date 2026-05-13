@@ -37,6 +37,7 @@ letAIcook helps a team **stay aligned from idea to delivery**:
 | `apps/web` | Next.js (App Router, TypeScript, Tailwind). Routes: `/login`, `/chat`, `/system-designer`, `/tasks`. |
 | `apps/api` | FastAPI (`uvicorn main:app`). Source package `letaicook_api/` — `routers/` (health, chat, design, Jira), `services/` (Gemini). Same HTTP routes as before. |
 | `firebase/` | `firestore.rules`, `firebase.json` — deploy with Firebase CLI. |
+| `scripts/` | Optional local tools (e.g. evening Firestore task reminder for Windows). |
 | `Plan/` | Optional roadmap / domain notes (non-canonical vs `AI_PROJECT_INSTRUCTIONS.md`). |
 
 ---
@@ -100,6 +101,18 @@ Compose loads `apps/web/.env.local` and `apps/api/.env.local` when present (`req
 | `apps/api/.env.local` | `CORS_ORIGINS` | Comma-separated origins; default includes `http://localhost:3000`. |
 
 Details: [`apps/api/api.env.sample`](./apps/api/api.env.sample), [`apps/web/firebase.web.env.sample`](./apps/web/firebase.web.env.sample).
+
+### Optional: evening task reminder (Windows)
+
+`scripts/evening_task_reminder.py` reads open tasks from Firestore (`projects/{teamId}/tasks`) and shows a **native message box** (up to five items, newest `updatedAt` first for your assignments). It uses the **Firebase Admin SDK** with a **service account JSON** on your machine only — **never commit** that file.
+
+1. Install deps once: `pip install -r scripts/requirements-task-reminder.txt` (not part of the API Docker image).
+2. Copy [`scripts/task-reminder.env.sample`](./scripts/task-reminder.env.sample) to `scripts/.env.task-reminder` (gitignored via `.env.*`) or set variables in Task Scheduler.
+3. Set **`GOOGLE_APPLICATION_CREDENTIALS`** to the JSON path, **`TASK_REMINDER_UID`** to your Firebase Auth uid, and optionally **`TASK_REMINDER_TEAM_ID`** (default `demo-project`). Admins can set **`TASK_REMINDER_ALL_OPEN_TASKS=1`** instead of `TASK_REMINDER_UID` to list the five most recently updated **team** open tasks (trusted PC only; Admin SDK bypasses Firestore rules).
+
+Schedule **Task Scheduler** → daily at **18:00** → action: `python` with argument `scripts/evening_task_reminder.py` and “Start in” = repo root. Test with `python scripts/evening_task_reminder.py --dry-run`.
+
+**Automated tests** (no Firebase project required; Firestore is mocked): from repo root, after `pip install -r scripts/requirements-task-reminder.txt`, run `pytest scripts/tests -v` or `python -m unittest discover -s scripts/tests -p "test_*.py" -v`. You should see all tests **OK** / **passed**.
 
 ---
 

@@ -1,0 +1,5 @@
+# Local / scheduled Windows reminder only — not installed in the API Docker image.
+# Install: pip install -r scripts/requirements-task-reminder.txt
+# Run tests: pytest scripts/tests -v   (from repo root; requires this file’s deps)
+firebase-admin>=6.5.0
+pytest>=8.0.0
