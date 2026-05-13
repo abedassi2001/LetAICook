@@ -115,6 +115,7 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 | 2026-05-11 | **Planning chat:** Persists to **`users/{uid}/planningChat/current`** (signed-in) + **`sessionStorage`** keys in `planning-sync.ts` (hydrate on `/chat` so navigation does not overwrite history; session keys scoped by owner uid / `__anon__`). Update **`firebase/firestore.rules`** when deploying. |
 | 2026-05-12 | **Tests:** `apps/api`: **`pytest`** (health, `DesignProjectResponse`, `gemini_shared` mocks, `/design-project` with mocked Gemini). `apps/web`: **`npm run test`** (Vitest — `normalize.ts`, `planning-sync.ts`). No secrets required. See README “Automated tests”. |
 | 2026-05-12 | **API layout:** `apps/api/letaicook_api/` — `routers/` (per-area route modules), `services/gemini_shared.py`; root **`main.py`** re-exports `app` for `uvicorn main:app`. **`tests/unit/`** vs **`tests/integration/`** for pytest. **`app.include_router(jira)`** registers Jira routes (was imported but not mounted before). |
+| 2026-05-14 | **Optional script:** `scripts/evening_task_reminder.py` — local Windows reminder at 18:00 via Task Scheduler; reads `projects/{teamId}/tasks` with Firebase Admin + `GOOGLE_APPLICATION_CREDENTIALS`; env vars documented in README (not shipped in `apps/api` Docker image). **`scripts/tests/test_evening_task_reminder.py`** — unittest + mocked Firestore (`pytest scripts/tests`). |
 
 *(Append a one-line note here whenever this file or Firebase setup changes materially.)*
 
