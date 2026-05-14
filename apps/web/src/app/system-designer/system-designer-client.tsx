@@ -8,6 +8,7 @@ import { MermaidChart } from "@/components/system-design/mermaid-chart";
 import { ServiceMap } from "@/components/system-design/service-map";
 import { useAuth } from "@/contexts/auth-context";
 import { getPublicApiBaseUrl } from "@/lib/api-base";
+import { buildJiraAuthHeaders } from "@/lib/jira-client";
 import { getFirestoreDb } from "@/lib/firebase";
 import {
   PLANNING_CONTEXT_KEY,
@@ -240,30 +241,32 @@ export function SystemDesignerClient() {
   }
 
   async function pushToJira() {
-    if (!design || !design.tasks?.length) {
+    if (!design || blueprint.tasks.length === 0) {
       alert("No tasks generated to push.");
+      return;
+    }
+    const jiraHeaders = buildJiraAuthHeaders(profile ?? null);
+    if (!jiraHeaders) {
+      alert("Add your Jira domain, email, and API token under Settings → Jira Integration.");
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const payload = {
-        issues: design.tasks.map((t: any) => ({
+        issues: blueprint.tasks.map((t) => ({
           summary: t.title,
           description: t.description,
           issue_type: "Task",
-          priority: "Medium"
-        }))
+          priority: "Medium",
+        })),
       };
 
       const res = await fetch(`${getPublicApiBaseUrl()}/jira/issues/batch`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Jira-Domain": profile?.jiraDomain || "",
-          "X-Jira-Email": profile?.jiraEmail || "",
-          "X-Jira-Token": profile?.jiraApiToken || "",
-          "X-Jira-Project": profile?.jiraDefaultProject || "",
+          ...jiraHeaders,
         },
         body: JSON.stringify(payload),
       });
@@ -384,7 +387,7 @@ export function SystemDesignerClient() {
             </button>
             <button
               type="button"
-              disabled={loading || !design || !design.tasks?.length}
+              disabled={loading || !design || blueprint.tasks.length === 0}
               onClick={() => void pushToJira()}
               className="rounded-xl border border-white/15 px-4 py-2.5 text-sm text-app-muted hover:text-green-400 disabled:opacity-40"
             >

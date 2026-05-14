@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from typing import Literal
 
 import google.generativeai as genai
 from design_routes import router as design_router
 from jira_routes import router as jira_router
+from tracking import router as tracking_router
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from gemini_shared import (
@@ -18,7 +20,11 @@ from gemini_shared import (
 from google.api_core.exceptions import GoogleAPIError
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="letAIcook API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+
+app = FastAPI(title="letAIcook API", version="0.1.0", lifespan=lifespan)
 
 _cors_origins = [
     o.strip()
@@ -34,6 +40,8 @@ app.add_middleware(
 )
 
 app.include_router(design_router)
+app.include_router(tracking_router)
+app.include_router(jira_router)
 
 PLANNING_SYSTEM_PROMPT = """You are letAIcook's planning assistant for software and product teams.
 

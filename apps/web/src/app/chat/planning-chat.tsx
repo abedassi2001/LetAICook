@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/contexts/auth-context";
 import { getPublicApiBaseUrl } from "@/lib/api-base";
+import { buildJiraAuthHeaders } from "@/lib/jira-client";
 import { getFirestoreDb } from "@/lib/firebase";
 import {
   PLANNING_CONTEXT_KEY,
@@ -28,11 +29,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 const FIRESTORE_DEBOUNCE_MS = 800;
 
 export function PlanningChat() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [messages, setMessages] = useState<PlanningChatMessage[] | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [jiraInstruction, setJiraInstruction] = useState("");
+  const [jiraJql, setJiraJql] = useState("");
+  const [jiraBusy, setJiraBusy] = useState(false);
+  const [jiraNotice, setJiraNotice] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const planningRef = useMemo(() => {
@@ -217,6 +222,69 @@ export function PlanningChat() {
     }
   }
 
+  const jiraReady = Boolean(user && buildJiraAuthHeaders(profile ?? null));
+
+  async function runJiraAiSync() {
+    const h = buildJiraAuthHeaders(profile ?? null);
+    if (!h) {
+      setJiraNotice("Add your Jira site, email, and API token under Settings → Jira Integration.");
+      return;
+    }
+    const ins = jiraInstruction.trim();
+    if (!ins) {
+      setJiraNotice("Describe what the AI should change in your Jira issues.");
+      return;
+    }
+    setJiraBusy(true);
+    setJiraNotice(null);
+    try {
+      const res = await fetch(`${getPublicApiBaseUrl()}/jira/ai-sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...h },
+        body: JSON.stringify({
+          instruction: ins,
+          ...(jiraJql.trim() ? { jql: jiraJql.trim() } : {}),
+        }),
+      });
+      const raw = await res.text();
+      let detail: string | undefined;
+      try {
+        const parsed = JSON.parse(raw) as { detail?: unknown };
+        if (typeof parsed.detail === "string") detail = parsed.detail;
+      } catch {
+        /* */
+      }
+      if (!res.ok) throw new Error(detail || raw || `Request failed (${res.status})`);
+      const data = JSON.parse(raw) as {
+        results: Array<{
+          issue_key: string;
+          updated_fields: string[];
+          transitioned_to?: string | null;
+          error?: string | null;
+        }>;
+        issues_considered: string[];
+      };
+      const parts = data.results.map((r) => {
+        const bits = [r.issue_key];
+        if (r.error) bits.push(`error: ${r.error}`);
+        else {
+          if (r.updated_fields?.length) bits.push(`updated: ${r.updated_fields.join(", ")}`);
+          if (r.transitioned_to) bits.push(`→ ${r.transitioned_to}`);
+        }
+        return bits.join(" — ");
+      });
+      setJiraNotice(
+        data.results.length
+          ? `Done. ${parts.join(" | ")}`
+          : `No changes proposed for ${data.issues_considered.length} issue(s). Try a clearer instruction.`,
+      );
+    } catch (e) {
+      setJiraNotice(e instanceof Error ? e.message : "Jira AI sync failed.");
+    } finally {
+      setJiraBusy(false);
+    }
+  }
+
   if (messages === null) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-app-bg px-4">
@@ -292,6 +360,50 @@ export function PlanningChat() {
       {error ? (
         <div className="shrink-0 border-t border-red-500/30 bg-red-950/40 px-4 py-2 text-center text-sm text-red-200">
           {error}
+        </div>
+      ) : null}
+
+      {user ? (
+        <div className="shrink-0 border-t border-app-border bg-app-bg/80 px-4 py-3 lg:px-6">
+          <div className="mx-auto max-w-3xl rounded-xl border border-app-border/80 bg-app-elevated/60 p-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-app-muted">Jira · AI apply changes</h2>
+            <p className="mt-1 text-[11px] text-app-muted">
+              Uses your saved API token from Settings. The model reads matching issues, proposes edits, and updates Jira
+              on your behalf.
+            </p>
+            {!jiraReady ? (
+              <p className="mt-2 text-sm text-amber-200/90">Complete Jira Integration in Settings (domain, email, token).</p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text outline-none focus:border-app-accent"
+                  rows={2}
+                  placeholder="Instruction, e.g. prepend [Discovery] to summaries of all listed issues"
+                  value={jiraInstruction}
+                  onChange={(e) => setJiraInstruction(e.target.value)}
+                  disabled={jiraBusy}
+                />
+                <input
+                  className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 font-mono text-xs text-app-text outline-none focus:border-app-accent"
+                  placeholder="Optional JQL (default: open issues in your default project)"
+                  value={jiraJql}
+                  onChange={(e) => setJiraJql(e.target.value)}
+                  disabled={jiraBusy}
+                />
+                <button
+                  type="button"
+                  disabled={jiraBusy}
+                  onClick={() => void runJiraAiSync()}
+                  className="rounded-lg bg-app-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-app-accent/90 disabled:opacity-50"
+                >
+                  {jiraBusy ? "Running…" : "Pull issues & apply with AI"}
+                </button>
+                {jiraNotice ? (
+                  <p className="whitespace-pre-wrap text-xs text-app-text/90">{jiraNotice}</p>
+                ) : null}
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
 

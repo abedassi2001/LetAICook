@@ -1,17 +1,17 @@
 @import "tailwindcss";
 
-/* Dark console: near-black + modern green accents */
+/* Modern vibrant dark theme with glassmorphism aesthetics */
 :root {
-  --app-bg: #030503;
-  --app-sidebar: #050805;
-  --app-elevated: #0a100c;
-  --app-border: #142818;
-  --app-text: #e6ebe8;
-  --app-muted: #7d8f82;
-  --app-accent: #34d399;
-  --app-accent-bright: #4ade80;
-  --app-accent-dim: #059669;
-  --app-on-accent: #031105;
+  --app-bg: #09090b;
+  --app-sidebar: #121214;
+  --app-elevated: #18181b;
+  --app-border: #27272a;
+  --app-text: #f4f4f5;
+  --app-muted: #a1a1aa;
+  --app-accent: #8b5cf6;
+  --app-accent-bright: #a78bfa;
+  --app-accent-dim: #6d28d9;
+  --app-on-accent: #ffffff;
 }
 
 @theme inline {
@@ -27,6 +27,19 @@
   --color-app-on-accent: var(--app-on-accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --animate-fade-in: fade-in 0.8s ease-out forwards;
+  --animate-slide-up: slide-up 0.8s ease-out forwards;
+  --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 }
 
 html {
@@ -37,4 +50,13 @@ body {
   background: var(--app-bg);
   color: var(--app-text);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Glassmorphism utility classes */
+.glass {
+  background: rgba(24, 24, 27, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }

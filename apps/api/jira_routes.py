@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from typing import Any
 
 import requests
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
+from gemini_shared import GeminiNotConfiguredError, generate_content_with_fallback
+from google.api_core.exceptions import GoogleAPIError
 from pydantic import BaseModel, Field
 from requests.auth import HTTPBasicAuth
 
@@ -182,6 +186,179 @@ def _adf_text(text: str) -> dict[str, Any]:
     }
 
 
+def _adf_to_plain(node: Any) -> str:
+    """Best-effort plain text from ADF (for prompts)."""
+    if node is None:
+        return ""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, dict):
+        if node.get("type") == "text":
+            return str(node.get("text", ""))
+        parts = [_adf_to_plain(c) for c in (node.get("content") or [])]
+        return " ".join(p for p in parts if p)
+    if isinstance(node, list):
+        return " ".join(_adf_to_plain(c) for c in node)
+    return ""
+
+
+def _select_transition(transitions: list[dict[str, Any]], transition_name: str) -> dict[str, Any] | None:
+    target = transition_name.lower()
+    for t in transitions:
+        if str(t.get("name", "")).lower() == target:
+            return t
+    return None
+
+
+def _perform_transition_by_name(
+    base_url: str,
+    auth: HTTPBasicAuth,
+    issue_key: str,
+    transition_name: str,
+) -> str:
+    resp = requests.get(
+        f"{base_url}/rest/api/3/issue/{issue_key}/transitions",
+        headers=_HEADERS,
+        auth=auth,
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to fetch transitions for {issue_key}: {resp.text[:300]}",
+        )
+    transitions = resp.json().get("transitions", [])
+    match = _select_transition(transitions, transition_name)
+    if not match:
+        available = [t["name"] for t in transitions]
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Transition '{transition_name}' not available for {issue_key}. "
+                f"Available: {available}"
+            ),
+        )
+    resp = requests.post(
+        f"{base_url}/rest/api/3/issue/{issue_key}/transitions",
+        headers=_HEADERS,
+        auth=auth,
+        json={"transition": {"id": match["id"]}},
+        timeout=10,
+    )
+    if resp.status_code not in (200, 204):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Transition failed ({resp.status_code}): {resp.text[:300]}",
+        )
+    return str(match.get("to", {}).get("name") or transition_name)
+
+
+def _jira_issue_search(
+    base_url: str,
+    auth: HTTPBasicAuth,
+    jql: str,
+    max_results: int,
+) -> list[dict[str, Any]]:
+    resp = requests.post(
+        f"{base_url}/rest/api/3/search",
+        headers=_HEADERS,
+        auth=auth,
+        json={
+            "jql": jql,
+            "maxResults": max_results,
+            "fields": ["summary", "description", "status"],
+        },
+        timeout=25,
+    )
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Jira search failed ({resp.status_code}): {resp.text[:400]}",
+        )
+    raw_issues = resp.json().get("issues") or []
+    out: list[dict[str, Any]] = []
+    for item in raw_issues:
+        key = item.get("key")
+        if not key:
+            continue
+        fields = item.get("fields") or {}
+        desc = fields.get("description")
+        plain = _adf_to_plain(desc) if isinstance(desc, dict) else ""
+        status_obj = fields.get("status") or {}
+        out.append(
+            {
+                "issue_key": key,
+                "summary": str(fields.get("summary") or ""),
+                "description": plain[:8000],
+                "status": str(status_obj.get("name") or "Unknown"),
+            }
+        )
+    return out
+
+
+def _apply_issue_fields(
+    base_url: str,
+    auth: HTTPBasicAuth,
+    issue_key: str,
+    *,
+    summary: str | None,
+    description_plain: str | None,
+) -> list[str]:
+    fields: dict[str, Any] = {}
+    if summary is not None:
+        fields["summary"] = summary
+    if description_plain is not None:
+        fields["description"] = _adf_text(description_plain)
+    if not fields:
+        return []
+    resp = requests.put(
+        f"{base_url}/rest/api/3/issue/{issue_key}",
+        headers=_HEADERS,
+        auth=auth,
+        json={"fields": fields},
+        timeout=20,
+    )
+    if resp.status_code not in (200, 204):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Jira update failed for {issue_key} ({resp.status_code}): {resp.text[:500]}",
+        )
+    updated: list[str] = []
+    if summary is not None:
+        updated.append("summary")
+    if description_plain is not None:
+        updated.append("description")
+    return updated
+
+
+JIRA_AI_SYSTEM = """You are a careful Jira Cloud assistant. You receive:
+1) A JSON array of issues, each with issue_key, summary, description (plain text excerpt), and status.
+2) A natural-language instruction from the user.
+
+Return ONLY a JSON array (no markdown code fences) of change objects. Each object may include:
+- "issue_key" (string, required): must be exactly one of the keys from the input list.
+- "summary" (string, optional): new title if it should change.
+- "description" (string, optional): replacement plain-text body if it should change.
+- "transition_name" (string, optional): exact Jira transition name to execute if the user asked for a status/workflow change.
+
+Rules:
+- Omit issues that need no edits.
+- Never invent issue keys.
+- If you are unsure about a transition name, omit transition_name rather than guessing.
+- Keep edits minimal and aligned with the instruction."""
+
+
+def _parse_model_json_array(text: str) -> list[dict[str, Any]]:
+    cleaned = text.strip()
+    m = re.search(r"\[[\s\S]*\]", cleaned)
+    if m:
+        cleaned = m.group(0)
+    data = json.loads(cleaned)
+    if not isinstance(data, list):
+        raise ValueError("Model output is not a JSON array.")
+    return [x for x in data if isinstance(x, dict)]
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -340,53 +517,8 @@ def transition_jira_issue(
 ) -> TransitionResponse:
     """Transition a Jira issue to a new status (e.g. 'In Progress', 'Done')."""
     base_url, auth, _ = config
-
-    # 1. Get available transitions
-    resp = requests.get(
-        f"{base_url}/rest/api/3/issue/{issue_key}/transitions",
-        headers=_HEADERS,
-        auth=auth,
-        timeout=10,
-    )
-    if resp.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to fetch transitions for {issue_key}: {resp.text[:300]}",
-        )
-
-    transitions = resp.json().get("transitions", [])
-    target = body.transition_name.lower()
-    match = next(
-        (t for t in transitions if t["name"].lower() == target),
-        None,
-    )
-    if not match:
-        available = [t["name"] for t in transitions]
-        raise HTTPException(
-            status_code=400,
-            detail=f"Transition '{body.transition_name}' not available for {issue_key}. "
-                   f"Available: {available}",
-        )
-
-    # 2. Perform transition
-    resp = requests.post(
-        f"{base_url}/rest/api/3/issue/{issue_key}/transitions",
-        headers=_HEADERS,
-        auth=auth,
-        json={"transition": {"id": match["id"]}},
-        timeout=10,
-    )
-    if resp.status_code not in (200, 204):
-        raise HTTPException(
-            status_code=502,
-            detail=f"Transition failed ({resp.status_code}): {resp.text[:300]}",
-        )
-
-    return TransitionResponse(
-        ok=True,
-        issue_key=issue_key,
-        new_status=match.get("to", {}).get("name", body.transition_name),
-    )
+    new_status = _perform_transition_by_name(base_url, auth, issue_key, body.transition_name)
+    return TransitionResponse(ok=True, issue_key=issue_key, new_status=new_status)
 
 
 @router.post("/issues/batch", response_model=BatchCreateResponse)
@@ -415,3 +547,116 @@ def batch_create_jira_issues(
             errors.append({"index": i, "summary": issue.summary, "error": e.detail})
 
     return BatchCreateResponse(created=created, errors=errors)
+
+
+class JiraAiSyncRequest(BaseModel):
+    """Pull issues with JQL, ask Gemini for edits, apply updates in Jira (user credentials via headers)."""
+
+    instruction: str = Field(..., min_length=1, max_length=8000)
+    jql: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="Jira JQL. If omitted, uses open issues in the default project.",
+    )
+    max_issues: int = Field(default=12, ge=1, le=30)
+
+
+class JiraAiSyncResultItem(BaseModel):
+    issue_key: str
+    updated_fields: list[str] = Field(default_factory=list)
+    transitioned_to: str | None = None
+    error: str | None = None
+
+
+class JiraAiSyncResponse(BaseModel):
+    jql_used: str
+    issues_considered: list[str]
+    results: list[JiraAiSyncResultItem]
+
+
+@router.post("/ai-sync", response_model=JiraAiSyncResponse)
+def jira_ai_sync(
+    body: JiraAiSyncRequest,
+    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+) -> JiraAiSyncResponse:
+    """
+    Fetch issues from Jira with the logged-in user's token (X-Jira-* headers),
+    propose field/transition updates with Gemini, then apply them in Jira.
+    """
+    base_url, auth, default_proj = config
+    jql = (body.jql or "").strip()
+    if not jql:
+        if not default_proj:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Provide a JQL query or set default project "
+                    "(X-Jira-Project header or JIRA_DEFAULT_PROJECT_KEY)."
+                ),
+            )
+        jql = f'project = {default_proj} AND statusCategory != "Done" ORDER BY updated DESC'
+
+    issues = _jira_issue_search(base_url, auth, jql, body.max_issues)
+    keys = [i["issue_key"] for i in issues]
+    if not keys:
+        return JiraAiSyncResponse(jql_used=jql, issues_considered=[], results=[])
+
+    valid_keys = set(keys)
+    user_blob = json.dumps({"issues": issues, "instruction": body.instruction}, ensure_ascii=False)
+
+    try:
+        raw = generate_content_with_fallback(
+            system_instruction=JIRA_AI_SYSTEM,
+            user_content=user_blob,
+            temperature=0.2,
+            response_mime_type="application/json",
+        )
+    except GeminiNotConfiguredError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except GoogleAPIError as e:
+        raise HTTPException(status_code=502, detail=f"Gemini error: {e!s}") from e
+
+    try:
+        changes = _parse_model_json_array(raw)
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Model returned invalid JSON: {e!s}",
+        ) from e
+
+    results: list[JiraAiSyncResultItem] = []
+    for ch in changes:
+        key = str(ch.get("issue_key") or "").strip().upper()
+        if not key or key not in valid_keys:
+            continue
+        item = JiraAiSyncResultItem(issue_key=key)
+        try:
+            new_summary: str | None = None
+            new_desc: str | None = None
+            if isinstance(ch.get("summary"), str) and ch["summary"].strip():
+                new_summary = ch["summary"].strip()
+            if isinstance(ch.get("description"), str) and ch["description"].strip():
+                new_desc = ch["description"].strip()
+
+            if new_summary is not None or new_desc is not None:
+                item.updated_fields = _apply_issue_fields(
+                    base_url,
+                    auth,
+                    key,
+                    summary=new_summary,
+                    description_plain=new_desc,
+                )
+
+            tn = ch.get("transition_name")
+            if isinstance(tn, str) and tn.strip():
+                item.transitioned_to = _perform_transition_by_name(
+                    base_url, auth, key, tn.strip()
+                )
+        except HTTPException as e:
+            detail = e.detail
+            item.error = detail if isinstance(detail, str) else json.dumps(detail)
+        except Exception as e:
+            item.error = str(e)
+        results.append(item)
+
+    return JiraAiSyncResponse(jql_used=jql, issues_considered=keys, results=results)
