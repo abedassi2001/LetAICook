@@ -82,6 +82,7 @@ export function TasksBoard() {
   const [loading, setLoading] = useState(true);
 
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [dueLocal, setDueLocal] = useState("");
   const [assigneeUid, setAssigneeUid] = useState<string>("");
@@ -363,6 +364,10 @@ export function TasksBoard() {
     return doc(getFirestoreDb(), "projects", teamId, "tasks", taskId);
   }
 
+  function canEditTaskDetails(data: TaskDoc) {
+    return isAdmin || data.assigneeUid === uid;
+  }
+
   async function syncTaskToJira(
     task: TaskDoc,
     patch: Record<string, unknown>,
@@ -422,9 +427,10 @@ export function TasksBoard() {
       : user.uid;
     const teamId = profile?.teamId || DEMO_PROJECT_ID;
     const trimmedTitle = title.trim();
+    const trimmedDescription = description.trim();
     const ref = await addDoc(tasksCollection(teamId), {
       title: trimmedTitle,
-      description: "",
+      description: trimmedDescription,
       status: "todo" satisfies TaskStatus,
       priority,
       publishedByUid: user.uid,
@@ -445,7 +451,7 @@ export function TasksBoard() {
       try {
         const created = await createJiraIssue(jiraCreds, {
           summary: trimmedTitle,
-          description: "",
+          description: trimmedDescription,
           priority,
           project_key: activeJiraProject,
         });
@@ -463,6 +469,7 @@ export function TasksBoard() {
     }
 
     setTitle("");
+    setDescription("");
     setDueLocal("");
     setAssigneeUid("");
   }
@@ -731,6 +738,16 @@ export function TasksBoard() {
                 required
               />
             </label>
+            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+              <span className="text-app-muted">Description / app scope</span>
+              <textarea
+                className="min-h-[100px] rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text placeholder:text-app-muted focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Describe the work, acceptance criteria, or app requirements…"
+                rows={4}
+              />
+            </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-app-muted">Due (local)</span>
               <input
@@ -795,11 +812,50 @@ export function TasksBoard() {
               className="rounded-xl border border-app-border bg-app-elevated/60 p-4 ring-1 ring-white/[0.04]"
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <p className="font-medium text-app-text">
-                    {data.title}
-                  </p>
-                  <p className="mt-1 text-xs text-app-muted">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs text-app-muted">Title</span>
+                    {canEditTaskDetails(data) ? (
+                      <input
+                        className="rounded-lg border border-app-border bg-app-bg px-2 py-1.5 text-sm font-medium text-app-text focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+                        defaultValue={data.title}
+                        onBlur={(e) => {
+                          const next = e.target.value.trim();
+                          if (next && next !== data.title) {
+                            void patchTask(id, { title: next }, data);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <p className="font-medium text-app-text">{data.title}</p>
+                    )}
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs text-app-muted">
+                      Description / app scope
+                    </span>
+                    {canEditTaskDetails(data) ? (
+                      <textarea
+                        className="min-h-[80px] rounded-lg border border-app-border bg-app-bg px-2 py-1.5 text-sm text-app-text focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+                        defaultValue={data.description}
+                        placeholder="Add or update the task or app description…"
+                        rows={3}
+                        onBlur={(e) => {
+                          const next = e.target.value.trim();
+                          if (next !== (data.description || "").trim()) {
+                            void patchTask(id, { description: next }, data);
+                          }
+                        }}
+                      />
+                    ) : data.description ? (
+                      <p className="whitespace-pre-wrap text-sm text-app-muted">
+                        {data.description}
+                      </p>
+                    ) : (
+                      <p className="text-sm italic text-app-muted">No description</p>
+                    )}
+                  </label>
+                  <p className="text-xs text-app-muted">
                     Updated: {formatTs(data.updatedAt)}
                     {data.dueAt ? (
                       <>

@@ -35,6 +35,10 @@ import {
   Timestamp,
   type Unsubscribe,
 } from "firebase/firestore";
+import {
+  shouldShowRemoteWorkspaceNotice,
+  stableDesignJson,
+} from "@/lib/system-design-workspace-sync";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const TABS = [
@@ -78,25 +82,44 @@ export function SystemDesignerClient() {
   const [extraMarkdown, setExtraMarkdown] = useState<string | null>(null);
   const [extraTitle, setExtraTitle] = useState("");
   const lastLocalSaveMs = useRef(0);
-  const snapshotHydrated = useRef(false);
+  const ignoreRemoteUntilMs = useRef(0);
+  const hydratedUid = useRef<string | null>(null);
+  const descriptionLive = useRef("");
+  const designLive = useRef<SystemDesignRawSnapshot | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   /** Once the user edits the description box, we stop auto-overwriting from planning (until "Pull from planning"). */
   const descriptionUserEdited = useRef(false);
+  const descriptionFocused = useRef(false);
+  const descriptionSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [descriptionSaveState, setDescriptionSaveState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [editOverview, setEditOverview] = useState(false);
+  const [editingTaskIndex, setEditingTaskIndex] = useState<number | null>(null);
 
   const blueprint = useMemo(
     () => (design ? parseDesignJson(design).blueprint : emptyBlueprint()),
     [design],
   );
 
-  const workspaceRef = user
-    ? doc(
-        getFirestoreDb(),
-        "users",
-        user.uid,
-        SYSTEM_DESIGNS_COLLECTION,
-        SYSTEM_DESIGN_WORKSPACE_ID,
-      )
-    : null;
+  const workspaceRef = useMemo(() => {
+    if (!user?.uid) return null;
+    return doc(
+      getFirestoreDb(),
+      "users",
+      user.uid,
+      SYSTEM_DESIGNS_COLLECTION,
+      SYSTEM_DESIGN_WORKSPACE_ID,
+    );
+  }, [user?.uid]);
+
+  useEffect(() => {
+    descriptionLive.current = description;
+  }, [description]);
+
+  useEffect(() => {
+    designLive.current = design;
+  }, [design]);
 
   const persistWorkspace = useCallback(
     async (snap: SystemDesignRawSnapshot, desc: string, note?: string) => {
@@ -114,7 +137,9 @@ export function SystemDesignerClient() {
           note,
         },
       ];
-      lastLocalSaveMs.current = Date.now();
+      const now = Date.now();
+      lastLocalSaveMs.current = now;
+      ignoreRemoteUntilMs.current = now + 4000;
       await setDoc(
         workspaceRef,
         {
@@ -128,60 +153,153 @@ export function SystemDesignerClient() {
         { merge: true },
       );
       setVersions(versionsNext);
+      setRemoteNotice(false);
     },
     [user, workspaceRef],
   );
 
+  const persistDescriptionDraft = useCallback(
+    async (desc: string) => {
+      if (!user || !workspaceRef) return;
+      setDescriptionSaveState("saving");
+      try {
+        const now = Date.now();
+        lastLocalSaveMs.current = now;
+        ignoreRemoteUntilMs.current = now + 4000;
+        await setDoc(
+          workspaceRef,
+          {
+            ownerUid: user.uid,
+            descriptionDraft: desc,
+            updatedAt: serverTimestamp(),
+            updatedAtIso: new Date().toISOString(),
+          },
+          { merge: true },
+        );
+        setDescriptionSaveState("saved");
+        setRemoteNotice(false);
+      } catch {
+        setDescriptionSaveState("error");
+      }
+    },
+    [user, workspaceRef],
+  );
+
+  const patchDesignSnapshot = useCallback(
+    (
+      patcher: (raw: SystemDesignRawSnapshot) => SystemDesignRawSnapshot,
+      note = "edit",
+    ) => {
+      setDesign((prev) => {
+        if (!prev) return prev;
+        const next = patcher(prev);
+        void persistWorkspace(next, description, note);
+        return next;
+      });
+    },
+    [description, persistWorkspace],
+  );
+
   useEffect(() => {
-    if (!workspaceRef || !user) return;
-    snapshotHydrated.current = false;
+    if (!workspaceRef || !user?.uid) return;
+
     let unsub: Unsubscribe | undefined;
-    (async () => {
-      const cur = await getDoc(workspaceRef);
-      const d = cur.data() as SystemDesignWorkspaceDoc | undefined;
-      if (d?.descriptionDraft?.trim()) {
-        setDescription(d.descriptionDraft);
-        descriptionUserEdited.current = true;
-      } else {
-        const fromPlanning = readPlanningProjectDescription();
-        if (fromPlanning.trim()) {
-          setDescription(fromPlanning);
-          descriptionUserEdited.current = false;
+    let cancelled = false;
+
+    const applyHydration = (d: SystemDesignWorkspaceDoc | undefined) => {
+      const shouldLoadDescription =
+        hydratedUid.current !== user.uid &&
+        !descriptionFocused.current &&
+        !descriptionUserEdited.current;
+
+      if (shouldLoadDescription) {
+        if (d?.descriptionDraft?.trim()) {
+          setDescription(d.descriptionDraft);
+          descriptionUserEdited.current = true;
+        } else {
+          const fromPlanning = readPlanningProjectDescription();
+          if (fromPlanning.trim()) {
+            setDescription(fromPlanning);
+            descriptionUserEdited.current = false;
+          }
         }
       }
-      if (d?.latest) setDesign(d.latest);
-      if (d?.versions?.length) setVersions(d.versions);
+
+      if (hydratedUid.current !== user.uid) {
+        if (d?.latest) setDesign(d.latest);
+        if (d?.versions?.length) setVersions(d.versions);
+        hydratedUid.current = user.uid;
+      }
+
       if (d?.updatedAt && typeof (d.updatedAt as Timestamp).toMillis === "function") {
         lastLocalSaveMs.current = (d.updatedAt as Timestamp).toMillis();
       }
+    };
+
+    void (async () => {
+      const cur = await getDoc(workspaceRef);
+      if (cancelled) return;
+      applyHydration(cur.data() as SystemDesignWorkspaceDoc | undefined);
 
       unsub = onSnapshot(workspaceRef, (snap) => {
-        if (!snap.exists()) return;
-        if (!snapshotHydrated.current) {
-          snapshotHydrated.current = true;
-          return;
-        }
+        if (!snap.exists() || snap.metadata.hasPendingWrites) return;
         const data = snap.data() as SystemDesignWorkspaceDoc;
-        if (snap.metadata.hasPendingWrites) return;
         const ts = data.updatedAt as Timestamp | undefined;
-        const ms = ts?.toMillis?.() ?? 0;
-        if (ms > lastLocalSaveMs.current + 800) {
+        const remoteUpdatedAtMs = ts?.toMillis?.() ?? 0;
+
+        if (
+          shouldShowRemoteWorkspaceNotice({
+            ignoreRemoteUntilMs: ignoreRemoteUntilMs.current,
+            remoteUpdatedAtMs,
+            lastLocalSaveMs: lastLocalSaveMs.current,
+            remoteDescriptionDraft: data.descriptionDraft ?? "",
+            localDescription: descriptionLive.current,
+            remoteDesignJson: stableDesignJson(data.latest ?? null),
+            localDesignJson: stableDesignJson(designLive.current),
+          })
+        ) {
           setRemoteNotice(true);
+        } else if (remoteUpdatedAtMs > 0) {
+          lastLocalSaveMs.current = Math.max(
+            lastLocalSaveMs.current,
+            remoteUpdatedAtMs,
+          );
         }
       });
     })();
-    return () => unsub?.();
-  }, [workspaceRef, user]);
+
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, [workspaceRef, user?.uid]);
 
   useEffect(() => {
     function onPlanningSync() {
-      if (descriptionUserEdited.current) return;
+      if (descriptionUserEdited.current || descriptionFocused.current) return;
       const next = readPlanningProjectDescription();
       if (next.trim()) setDescription(next);
     }
     window.addEventListener(PLANNING_SYNC_EVENT, onPlanningSync);
     return () => window.removeEventListener(PLANNING_SYNC_EVENT, onPlanningSync);
   }, []);
+
+  useEffect(() => {
+    if (!descriptionUserEdited.current || !user || descriptionFocused.current) {
+      return;
+    }
+    if (descriptionSaveTimer.current) {
+      clearTimeout(descriptionSaveTimer.current);
+    }
+    descriptionSaveTimer.current = setTimeout(() => {
+      void persistDescriptionDraft(description);
+    }, 1500);
+    return () => {
+      if (descriptionSaveTimer.current) {
+        clearTimeout(descriptionSaveTimer.current);
+      }
+    };
+  }, [description, user, persistDescriptionDraft]);
 
   async function runDesign(regenerateFocus?: string) {
     const base = getPublicApiBaseUrl();
@@ -307,52 +425,101 @@ export function SystemDesignerClient() {
       <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-4 lg:px-8 lg:py-6">
         {remoteNotice ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-500/30 bg-amber-950/25 px-4 py-3 text-sm text-amber-100 backdrop-blur-md">
-            <span>This workspace may have changed in another tab or device.</span>
-            <button
-              type="button"
-              className="rounded-lg bg-app-accent px-3 py-1.5 text-xs font-semibold text-app-on-accent"
-              onClick={async () => {
-                if (!workspaceRef) return;
-                const cur = await getDoc(workspaceRef);
-                const data = cur.data() as SystemDesignWorkspaceDoc | undefined;
-                if (data?.latest) setDesign(data.latest);
-                if (data?.versions) setVersions(data.versions);
-                setRemoteNotice(false);
-              }}
-            >
-              Reload from cloud
-            </button>
+            <span>
+              This workspace may have changed in another tab or device. You can keep
+              editing below, or reload the saved design from the cloud.
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-amber-100 hover:bg-white/10"
+                onClick={() => setRemoteNotice(false)}
+              >
+                Dismiss
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-app-accent px-3 py-1.5 text-xs font-semibold text-app-on-accent"
+                onClick={async () => {
+                  if (!workspaceRef) return;
+                  const cur = await getDoc(workspaceRef);
+                  const data = cur.data() as SystemDesignWorkspaceDoc | undefined;
+                  if (data?.descriptionDraft?.trim()) {
+                    setDescription(data.descriptionDraft);
+                    descriptionUserEdited.current = true;
+                  }
+                  if (data?.latest) setDesign(data.latest);
+                  if (data?.versions) setVersions(data.versions);
+                  const ts = data?.updatedAt as Timestamp | undefined;
+                  if (ts?.toMillis) {
+                    lastLocalSaveMs.current = ts.toMillis();
+                    ignoreRemoteUntilMs.current = ts.toMillis() + 4000;
+                  }
+                  setRemoteNotice(false);
+                }}
+              >
+                Reload from cloud
+              </button>
+            </div>
           </div>
         ) : null}
 
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 shadow-xl shadow-black/40 backdrop-blur-xl transition-all duration-300">
           <div className="flex flex-wrap items-end justify-between gap-2">
-            <label className="block text-sm font-medium text-app-muted">Project description</label>
-            <button
-              type="button"
-              className="text-xs font-medium text-app-accent hover:underline disabled:opacity-40"
-              disabled={loading}
-              onClick={() => {
-                descriptionUserEdited.current = false;
-                const t = readPlanningProjectDescription();
-                if (t.trim()) setDescription(t);
-              }}
-            >
-              Pull latest from planning
-            </button>
+            <label className="block text-sm font-medium text-app-muted">
+              Project description (job / app scope)
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              {descriptionSaveState === "saving" ? (
+                <span className="text-xs text-app-muted">Saving…</span>
+              ) : descriptionSaveState === "saved" ? (
+                <span className="text-xs text-green-400/90">Saved</span>
+              ) : descriptionSaveState === "error" ? (
+                <span className="text-xs text-red-400">Save failed</span>
+              ) : null}
+              <button
+                type="button"
+                className="text-xs font-medium text-app-accent hover:underline"
+                onClick={() => {
+                  descriptionUserEdited.current = true;
+                  void persistDescriptionDraft(description);
+                }}
+              >
+                Save description
+              </button>
+              <button
+                type="button"
+                className="text-xs font-medium text-app-accent hover:underline"
+                onClick={() => {
+                  descriptionUserEdited.current = false;
+                  const t = readPlanningProjectDescription();
+                  if (t.trim()) setDescription(t);
+                }}
+              >
+                Pull latest from planning
+              </button>
+            </div>
           </div>
           <textarea
             className="mt-2 min-h-[120px] w-full resize-y rounded-xl border border-app-border bg-black/30 px-4 py-3 text-[15px] text-app-text placeholder:text-app-muted/50 focus:border-app-accent/60 focus:outline-none focus:ring-1 focus:ring-app-accent/30"
-            placeholder="e.g. AI cooking app with team collaboration, calendar sync, task manager, notifications, and recipe assistant…"
+            placeholder="e.g. Car park app with live occupancy, payments, and admin dashboard…"
             value={description}
+            onFocus={() => {
+              descriptionFocused.current = true;
+              descriptionUserEdited.current = true;
+            }}
+            onBlur={() => {
+              descriptionFocused.current = false;
+              if (user) void persistDescriptionDraft(description);
+            }}
             onChange={(e) => {
               descriptionUserEdited.current = true;
+              setDescriptionSaveState("idle");
               setDescription(e.target.value);
             }}
-            disabled={loading}
           />
           <p className="mt-1 text-[11px] text-app-muted">
-            Streams from planning while this field is untouched. Uses server{" "}
+            Editable anytime — streams from planning only until you change this field. Uses server{" "}
             <code className="rounded bg-app-elevated px-1">GOOGLE_API_KEY</code> /{" "}
             <code className="rounded bg-app-elevated px-1">GEMINI_API_KEY</code> (same as{" "}
             <code className="rounded bg-app-elevated px-1">/chat/plan</code>).
@@ -469,8 +636,65 @@ export function SystemDesignerClient() {
             {tab === "overview" ? (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur-md">
-                  <h2 className="text-lg font-semibold text-app-text">{d.project_name || "Untitled"}</h2>
-                  {d.description ? <p className="mt-2 text-sm text-app-muted">{d.description}</p> : null}
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <h2 className="text-lg font-semibold text-app-text">
+                      {d.project_name || "Untitled"}
+                    </h2>
+                    {design ? (
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-app-accent hover:underline"
+                        onClick={() => setEditOverview((v) => !v)}
+                      >
+                        {editOverview ? "Done" : "Edit"}
+                      </button>
+                    ) : null}
+                  </div>
+                  {editOverview && design ? (
+                    <div className="mt-3 space-y-2">
+                      <label className="flex flex-col gap-1 text-xs text-app-muted">
+                        Project name
+                        <input
+                          className="rounded-lg border border-app-border bg-app-bg px-2 py-1.5 text-sm text-app-text"
+                          defaultValue={d.project_name}
+                          onBlur={(e) => {
+                            const next = e.target.value.trim();
+                            if (next && next !== d.project_name) {
+                              patchDesignSnapshot((raw) => ({
+                                ...raw,
+                                project_name: next,
+                              }));
+                            }
+                          }}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-app-muted">
+                        Generated summary
+                        <textarea
+                          className="min-h-[88px] rounded-lg border border-app-border bg-app-bg px-2 py-1.5 text-sm text-app-text"
+                          defaultValue={d.description}
+                          rows={4}
+                          onBlur={(e) => {
+                            const next = e.target.value.trim();
+                            if (next !== (d.description || "").trim()) {
+                              patchDesignSnapshot((raw) => ({
+                                ...raw,
+                                description: next,
+                              }));
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                  ) : d.description ? (
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-app-muted">
+                      {d.description}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-sm italic text-app-muted">
+                      No generated summary yet — use the project description above and generate.
+                    </p>
+                  )}
                   <p className="mt-2 text-sm text-app-muted">
                     {d.pages.length} pages · {d.backend_services.length} services · {d.api_routes.length} API routes ·{" "}
                     {d.database_schema.length} entities · {d.tasks.length} sprint tasks · {d.relationships.length}{" "}
@@ -585,13 +809,80 @@ export function SystemDesignerClient() {
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h4 className="font-medium text-app-text">{t.title}</h4>
-                      {t.estimate_points != null ? (
-                        <span className="rounded-full bg-app-accent/15 px-2 py-0.5 text-xs text-app-accent">
-                          {t.estimate_points} pts
-                        </span>
-                      ) : null}
+                      <div className="flex items-center gap-2">
+                        {t.estimate_points != null ? (
+                          <span className="rounded-full bg-app-accent/15 px-2 py-0.5 text-xs text-app-accent">
+                            {t.estimate_points} pts
+                          </span>
+                        ) : null}
+                        {design ? (
+                          <button
+                            type="button"
+                            className="text-xs font-medium text-app-accent hover:underline"
+                            onClick={() =>
+                              setEditingTaskIndex((cur) => (cur === i ? null : i))
+                            }
+                          >
+                            {editingTaskIndex === i ? "Done" : "Edit"}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
-                    <p className="mt-2 text-sm text-app-muted">{t.description}</p>
+                    {editingTaskIndex === i && design ? (
+                      <div className="mt-3 space-y-2">
+                        <label className="flex flex-col gap-1 text-xs text-app-muted">
+                          Title
+                          <input
+                            className="rounded-lg border border-app-border bg-app-bg px-2 py-1.5 text-sm text-app-text"
+                            defaultValue={t.title}
+                            onBlur={(e) => {
+                              const next = e.target.value.trim();
+                              if (next && next !== t.title) {
+                                patchDesignSnapshot((raw) => {
+                                  const tasks = Array.isArray(raw.tasks)
+                                    ? [...raw.tasks]
+                                    : [];
+                                  const row = {
+                                    ...(tasks[i] as Record<string, unknown>),
+                                  };
+                                  row.title = next;
+                                  tasks[i] = row;
+                                  return { ...raw, tasks };
+                                });
+                              }
+                            }}
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs text-app-muted">
+                          Description
+                          <textarea
+                            className="min-h-[72px] rounded-lg border border-app-border bg-app-bg px-2 py-1.5 text-sm text-app-text"
+                            defaultValue={t.description}
+                            rows={3}
+                            onBlur={(e) => {
+                              const next = e.target.value.trim();
+                              if (next !== (t.description || "").trim()) {
+                                patchDesignSnapshot((raw) => {
+                                  const tasks = Array.isArray(raw.tasks)
+                                    ? [...raw.tasks]
+                                    : [];
+                                  const row = {
+                                    ...(tasks[i] as Record<string, unknown>),
+                                  };
+                                  row.description = next;
+                                  tasks[i] = row;
+                                  return { ...raw, tasks };
+                                });
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <p className="mt-2 whitespace-pre-wrap text-sm text-app-muted">
+                        {t.description || "No description"}
+                      </p>
+                    )}
                   </div>
                 ))}
                 {!d.tasks.length ? (
