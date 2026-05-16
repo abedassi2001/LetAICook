@@ -94,13 +94,19 @@ Compose loads `apps/web/.env.local` and `apps/api/.env.local` when present (`req
 
 | Where | Variable | Purpose |
 |-------|----------|---------|
-| `apps/web/.env.local` | `NEXT_PUBLIC_FIREBASE_*` | Firebase web SDK (public). |
-| `apps/web/.env.local` | `NEXT_PUBLIC_API_BASE_URL` | Optional; default `http://localhost:8000`. |
+| `apps/web/.env.local` | `NEXT_PUBLIC_FIREBASE_*` | Firebase web SDK (public); cloud project unless emulators are enabled. |
+| `apps/web/.env.local` | `NEXT_PUBLIC_API_BASE_URL` | FastAPI origin for `/chat/plan`, `/design-project`, … (see `src/lib/api-base.ts`). |
+| `apps/web/.env.local` | `NEXT_PUBLIC_USE_SAME_ORIGIN_API_PROXY`, `NEXT_PUBLIC_API_FOLLOW_WEB_HOST`, `NEXT_PUBLIC_API_PORT` | Optional; avoid hard-coding `localhost` for the API (see paragraph after the env table). |
+| `apps/web` build (Vercel, etc.) | `LETAICOOK_API_PROXY_TARGET` | Server-only: enables Next rewrite `/__letaicook_api/*` → FastAPI when set at build. |
 | `apps/api/.env.local` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Gemini for chat + system designer. |
 | `apps/api/.env.local` | `GEMINI_MODEL`, `GEMINI_MODEL_FALLBACKS` | Optional model selection and 429 fallbacks. |
-| `apps/api/.env.local` | `CORS_ORIGINS` | Comma-separated origins; default includes `http://localhost:3000`. |
+| `apps/api/.env.local` | `CORS_ORIGINS` | Comma-separated origins; must include your deployed Next origin in production. |
 
 Details: [`apps/api/api.env.sample`](./apps/api/api.env.sample), [`apps/web/firebase.web.env.sample`](./apps/web/firebase.web.env.sample).
+
+**Using your real Firebase project (not emulators):** leave `NEXT_PUBLIC_USE_FIREBASE_EMULATOR` unset and fill all `NEXT_PUBLIC_FIREBASE_*` values from the Firebase console. Auth and Firestore then use Google’s cloud, not localhost.
+
+**Calling FastAPI when it is not on `localhost:8000`:** set `NEXT_PUBLIC_API_BASE_URL` to your public API URL (for example `https://api.example.com`). If you open the app by LAN IP (`http://192.168.x.x:3000`), set `NEXT_PUBLIC_API_FOLLOW_WEB_HOST=true` so the browser uses the same host with port `8000` (see `apps/web/src/lib/api-base.ts`). For a single public web origin (for example Vercel) while the API stays on another host, set **`LETAICOOK_API_PROXY_TARGET`** at Next **build** time to the FastAPI base URL and **`NEXT_PUBLIC_USE_SAME_ORIGIN_API_PROXY=true`** in `apps/web/.env.local` so the browser calls `https://your-app.vercel.app/__letaicook_api/...` and Next rewrites to the API. Set **`CORS_ORIGINS`** on the API to include your deployed Next origin.
 
 ### Optional: evening task reminder (Windows)
 
