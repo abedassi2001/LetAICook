@@ -10,6 +10,10 @@ import { useAuth } from "@/contexts/auth-context";
 import { getPublicApiBaseUrl } from "@/lib/api-base";
 import { getFirestoreDb } from "@/lib/firebase";
 import {
+  batchCreateJiraIssues,
+  jiraCredentialsFromProfile,
+} from "@/lib/jira-client";
+import {
   PLANNING_CONTEXT_KEY,
   PLANNING_SYNC_EVENT,
   readPlanningProjectDescription,
@@ -249,44 +253,32 @@ export function SystemDesignerClient() {
       alert("No tasks generated to push.");
       return;
     }
+    const creds = jiraCredentialsFromProfile(profile);
+    if (!creds) {
+      setError("Connect Jira in Settings before pushing issues.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const payload = {
-        issues: rawTasks.map((t) => {
+      const data = await batchCreateJiraIssues(
+        creds,
+        rawTasks.map((t) => {
           const row = t as { title?: unknown; description?: unknown };
           return {
             summary: typeof row.title === "string" ? row.title : "",
-            description: typeof row.description === "string" ? row.description : "",
+            description:
+              typeof row.description === "string" ? row.description : "",
             issue_type: "Task",
-            priority: "Medium",
+            priority: "medium",
           };
         }),
-      };
-
-      const res = await fetch(`${getPublicApiBaseUrl()}/jira/issues/batch`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Jira-Domain": profile?.jiraDomain || "",
-          "X-Jira-Email": profile?.jiraEmail || "",
-          "X-Jira-Token": profile?.jiraApiToken || "",
-          "X-Jira-Project": profile?.jiraDefaultProject || "",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const raw = await res.text();
-      if (!res.ok) {
-        let detail = raw;
-        try {
-          const j = JSON.parse(raw) as { detail?: string };
-          if (j.detail) detail = j.detail;
-        } catch { /* */ }
-        throw new Error(detail);
-      }
-      const data = JSON.parse(raw);
-      alert(`Successfully created ${data.created?.length || 0} Jira issues! Check your Jira board.`);
+      );
+      const failed = data.errors?.length ?? 0;
+      alert(
+        `Created ${data.created?.length ?? 0} Jira issue(s).` +
+          (failed > 0 ? ` ${failed} failed — see error panel.` : ""),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to push to Jira");
     } finally {

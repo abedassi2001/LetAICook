@@ -2,12 +2,18 @@
 
 import { useAuth } from "@/contexts/auth-context";
 import { getFirestoreDb } from "@/lib/firebase";
+import {
+  jiraCredentialsFromProfile,
+  listJiraProjects,
+  testJiraConnection,
+  type JiraProject,
+} from "@/lib/jira-client";
 import { USERS_COLLECTION } from "@/lib/user-model";
-import { doc, updateDoc } from "firebase/firestore";
+import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { startTransition, useEffect, useState } from "react";
 
 export function SettingsClient() {
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const [activeTab, setActiveTab] = useState<"profile" | "jira">("profile");
 
   const [domain, setDomain] = useState("");
@@ -15,7 +21,22 @@ export function SettingsClient() {
   const [apiToken, setApiToken] = useState("");
   const [defaultProject, setDefaultProject] = useState("");
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [projects, setProjects] = useState<JiraProject[]>([]);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  function credentialsFromForm() {
+    const d = domain.trim();
+    const e = email.trim();
+    const t = apiToken.trim();
+    if (!d || !e || !t) return null;
+    return {
+      domain: d,
+      email: e,
+      apiToken: t,
+      defaultProject: defaultProject.trim(),
+    };
+  }
 
   useEffect(() => {
     if (!profile) return;
@@ -40,13 +61,55 @@ export function SettingsClient() {
         jiraEmail: email.trim(),
         jiraApiToken: apiToken.trim(),
         jiraDefaultProject: defaultProject.trim(),
+        updatedAt: serverTimestamp(),
       });
-      setMessage({ type: "success", text: "Jira settings saved successfully." });
+      await refreshProfile();
+      setMessage({
+        type: "success",
+        text: "Jira settings saved. Open Tasks to import issues from your project.",
+      });
     } catch (error) {
       console.error("Failed to save settings:", error);
       setMessage({ type: "error", text: "Failed to save settings. See console for details." });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleTestConnection() {
+    const creds = credentialsFromForm() ?? jiraCredentialsFromProfile(profile);
+    if (!creds) {
+      setMessage({
+        type: "error",
+        text: "Enter domain, email, and API token before testing.",
+      });
+      return;
+    }
+    setTesting(true);
+    setMessage(null);
+    setProjects([]);
+    try {
+      const result = await testJiraConnection(creds);
+      if (!result.ok) {
+        setMessage({ type: "error", text: result.message });
+        return;
+      }
+      const listed = await listJiraProjects(creds);
+      setProjects(listed);
+      setMessage({
+        type: "success",
+        text: result.user
+          ? `Connected as ${result.user}. ${listed.length} project(s) found.`
+          : result.message,
+      });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text:
+          error instanceof Error ? error.message : "Connection test failed.",
+      });
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -117,7 +180,9 @@ export function SettingsClient() {
         <div className="rounded-xl border border-app-border bg-app-elevated p-6">
           <h2 className="mb-4 text-lg font-semibold text-app-text">Jira Integration</h2>
           <p className="mb-6 text-sm text-app-muted">
-            Connect your Jira account to allow the AI agent to create and transition issues on your behalf.
+            Connect your Jira Cloud account. Tasks, status changes, and deletes on
+            the board sync to Jira when credentials are saved. API tokens are sent
+            to the FastAPI proxy only (not exposed in client bundles beyond your session).
           </p>
 
           <form onSubmit={handleSaveJira} className="space-y-4">
@@ -168,7 +233,7 @@ export function SettingsClient() {
               />
             </div>
 
-            <div className="pt-2">
+            <div className="flex flex-wrap gap-2 pt-2">
               <button
                 type="submit"
                 disabled={saving}
@@ -176,7 +241,39 @@ export function SettingsClient() {
               >
                 {saving ? "Saving..." : "Save settings"}
               </button>
+              <button
+                type="button"
+                disabled={testing || saving}
+                onClick={() => void handleTestConnection()}
+                className="rounded-lg border border-app-border px-4 py-2 text-sm font-medium text-app-text hover:border-app-accent disabled:opacity-50"
+              >
+                {testing ? "Testing…" : "Test connection"}
+              </button>
             </div>
+
+            {projects.length > 0 ? (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-app-text">
+                  Your projects (pick a default key above)
+                </label>
+                <ul className="max-h-40 overflow-y-auto rounded-lg border border-app-border bg-app-bg p-2 text-sm text-app-muted">
+                  {projects.map((p) => (
+                    <li key={p.id} className="py-0.5">
+                      <button
+                        type="button"
+                        className="w-full rounded px-1 py-0.5 text-left hover:bg-app-elevated hover:text-app-text"
+                        onClick={() => setDefaultProject(p.key)}
+                      >
+                        <span className="font-mono text-app-accent">{p.key}</span> — {p.name}
+                        {defaultProject === p.key ? (
+                          <span className="ml-2 text-xs text-app-accent">(selected)</span>
+                        ) : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
             {message && (
               <p

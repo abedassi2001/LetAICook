@@ -7,7 +7,7 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import {
   createContext,
   useCallback,
@@ -40,13 +40,6 @@ type AuthContextValue = AuthState & {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-async function fetchProfile(uid: string): Promise<UserProfileDoc | null> {
-  const ref = doc(getFirestoreDb(), USERS_COLLECTION, uid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return null;
-  return snap.data() as UserProfileDoc;
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfileDoc | null>(null);
@@ -54,46 +47,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const refreshProfile = useCallback(async () => {
-    const auth = getFirebaseAuth();
-    const u = auth.currentUser;
-    if (!u) {
-      setProfile(null);
-      return;
-    }
-    const p = await fetchProfile(u.uid);
-    setProfile(p);
+    /* Profile is kept live via onSnapshot; no-op for API compatibility. */
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     const auth = getFirebaseAuth();
-    const unsub = onAuthStateChanged(auth, async (u) => {
+    const unsubAuth = onAuthStateChanged(auth, (u) => {
       if (cancelled) return;
       setUser(u);
       setError(null);
       if (!u) {
         setProfile(null);
         setLoading(false);
-        return;
-      }
-      try {
-        const p = await fetchProfile(u.uid);
-        if (cancelled) return;
-        setProfile(p);
-      } catch (e) {
-        if (!cancelled) {
-          setProfile(null);
-          setError(e instanceof Error ? e.message : "Failed to load profile");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+      } else {
+        setLoading(true);
       }
     });
     return () => {
       cancelled = true;
-      unsub();
+      unsubAuth();
     };
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const ref = doc(getFirestoreDb(), USERS_COLLECTION, user.uid);
+    const unsubProfile = onSnapshot(
+      ref,
+      (snap) => {
+        if (cancelled) return;
+        setProfile(snap.exists() ? (snap.data() as UserProfileDoc) : null);
+        setError(null);
+        setLoading(false);
+      },
+      (e) => {
+        if (cancelled) return;
+        setProfile(null);
+        setError(e instanceof Error ? e.message : "Failed to load profile");
+        setLoading(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+      unsubProfile();
+    };
+  }, [user?.uid]);
 
   const signInEmail = useCallback(async (email: string, password: string) => {
     setError(null);

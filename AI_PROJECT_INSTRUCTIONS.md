@@ -47,7 +47,8 @@ These are the current repo conventions. If you change them, **update this file**
 | **Planning → Designer** | `apps/web/src/lib/planning-sync.ts` — user messages summarized for the designer description; custom event for live sync until the user edits the description field. |
 | **Planning chat (Firestore)** | `users/{uid}/planningChat/current` — message array + `updatedAt` (`planning-chat-model.ts`). |
 | **Task fields** | `task-model.ts`: includes `publishedByUid`, `assigneeUid`, `dueAt`, `completedAt`, `completedByUid`, status, priority, times, `jiraIssueKey`. **Change types, UI, and `firebase/firestore.rules` together.** |
-| **Firebase config (web)** | `apps/web/.env.local` — copy from `apps/web/firebase.web.env.sample`. Never commit secrets. |
+| **Firebase config (web)** | `apps/web/.env.local` — copy from `apps/web/firebase.web.env.sample`. Never commit secrets. Cloud Firebase is the default; emulators only when `NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true`. |
+| **FastAPI base URL (web)** | `apps/web/src/lib/api-base.ts` — `NEXT_PUBLIC_API_BASE_URL`, or `NEXT_PUBLIC_USE_SAME_ORIGIN_API_PROXY` + build-time `LETAICOOK_API_PROXY_TARGET`, or `NEXT_PUBLIC_API_FOLLOW_WEB_HOST` + `NEXT_PUBLIC_API_PORT`. See root README. |
 | **Firestore rules** | `firebase/firestore.rules` + `firebase.json` at repo root. **Teammates must deploy rules** after clone or rule changes: `firebase deploy --only firestore:rules`. |
 | **Automated tests** | `apps/api`: **`pytest`** from `apps/api` (`tests/unit/`, `tests/integration/`); `apps/web`: **`npm run test`** (Vitest). No API keys required; Gemini mocked where needed. See root **README** (“Automated tests”). |
 | **Product / UML docs** | `Plan/` — use for roadmap and domain language; **implementation must still match this instruction file.** |
@@ -116,6 +117,8 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 | 2026-05-12 | **Tests:** `apps/api`: **`pytest`** (health, `DesignProjectResponse`, `gemini_shared` mocks, `/design-project` with mocked Gemini). `apps/web`: **`npm run test`** (Vitest — `normalize.ts`, `planning-sync.ts`). No secrets required. See README “Automated tests”. |
 | 2026-05-12 | **API layout:** `apps/api/letaicook_api/` — `routers/` (per-area route modules), `services/gemini_shared.py`; root **`main.py`** re-exports `app` for `uvicorn main:app`. **`tests/unit/`** vs **`tests/integration/`** for pytest. **`app.include_router(jira)`** registers Jira routes (was imported but not mounted before). |
 | 2026-05-14 | **Optional script:** `scripts/evening_task_reminder.py` — local Windows reminder at 18:00 via Task Scheduler; reads `projects/{teamId}/tasks` with Firebase Admin + `GOOGLE_APPLICATION_CREDENTIALS`; env vars documented in README (not shipped in `apps/api` Docker image). **`scripts/tests/test_evening_task_reminder.py`** — unittest + mocked Firestore (`pytest scripts/tests`). |
+| 2026-05-14 | **Web → API routing:** `apps/web/src/lib/api-base.ts` documents cloud Firebase vs emulators; adds optional `NEXT_PUBLIC_USE_SAME_ORIGIN_API_PROXY` + `LETAICOOK_API_PROXY_TARGET` (Next rewrite `/__letaicook_api`) and `NEXT_PUBLIC_API_FOLLOW_WEB_HOST` for LAN/same-host API. README + `firebase.web.env.sample` updated. |
+| 2026-05-16 | **Jira integration:** Per-user Jira Cloud credentials in `users/{uid}` (Settings). FastAPI `/jira/*` proxy: create, update, delete, transition, batch, sync-status. Web `jira-client.ts`; `/tasks` syncs Firestore tasks with Jira when linked (`jiraIssueKey`). Optional server env in `api.env.sample`. |
 
 *(Append a one-line note here whenever this file or Firebase setup changes materially.)*
 

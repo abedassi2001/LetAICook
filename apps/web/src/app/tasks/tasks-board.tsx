@@ -8,8 +8,30 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "@/lib/task-model";
+import {
+  createJiraIssue,
+  deleteJiraIssue,
+  jiraCredentialsFromProfile,
+  listJiraProjectIssues,
+  listJiraProjects,
+  syncJiraIssueStatus,
+  updateJiraIssue,
+  type JiraIssueListItem,
+  type JiraProject,
+} from "@/lib/jira-client";
+import {
+  jiraPriorityToTaskPriority,
+  jiraStatusToTaskStatus,
+} from "@/lib/jira-status-map";
 import { USERS_COLLECTION, type UserProfileDoc } from "@/lib/user-model";
-import { useEffect, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   addDoc,
   collection,
@@ -63,9 +85,183 @@ export function TasksBoard() {
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [dueLocal, setDueLocal] = useState("");
   const [assigneeUid, setAssigneeUid] = useState<string>("");
+  const [jiraNotice, setJiraNotice] = useState<string | null>(null);
+  const [jiraBusy, setJiraBusy] = useState(false);
+  const [jiraProjects, setJiraProjects] = useState<JiraProject[]>([]);
+  const [selectedJiraProject, setSelectedJiraProject] = useState("");
+  const [jiraLiveIssues, setJiraLiveIssues] = useState<JiraIssueListItem[]>([]);
+  const [tasksReady, setTasksReady] = useState(false);
+  const jiraImportKeyRef = useRef<string | null>(null);
+  const jiraIssuesLoadKeyRef = useRef<string | null>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
 
   const isAdmin = profile?.role === "admin";
   const uid = user?.uid ?? "";
+  const jiraCreds = useMemo(
+    () => jiraCredentialsFromProfile(profile),
+    [
+      profile?.jiraDomain,
+      profile?.jiraEmail,
+      profile?.jiraApiToken,
+      profile?.jiraDefaultProject,
+    ],
+  );
+
+  const activeJiraProject =
+    selectedJiraProject || jiraCreds?.defaultProject || "";
+
+  const importFromJira = useCallback(
+    async (force = false) => {
+      if (!jiraCreds || !activeJiraProject || !user) return;
+      const syncKey = `${jiraCreds.domain}:${activeJiraProject}`;
+      if (!force && jiraImportKeyRef.current === syncKey) return;
+      jiraImportKeyRef.current = syncKey;
+
+      setJiraBusy(true);
+      setJiraNotice(null);
+      try {
+        const issues = await listJiraProjectIssues(
+          jiraCreds,
+          activeJiraProject,
+        );
+        const existingKeys = new Set(
+          itemsRef.current
+            .map((i) => i.data.jiraIssueKey)
+            .filter((k): k is string => Boolean(k)),
+        );
+        const teamId = profile?.teamId || DEMO_PROJECT_ID;
+        const now = serverTimestamp();
+        let imported = 0;
+
+        for (const issue of issues) {
+          if (existingKeys.has(issue.issue_key)) continue;
+          const status = jiraStatusToTaskStatus(
+            issue.status,
+            issue.status_category,
+          );
+          const priority = jiraPriorityToTaskPriority(issue.priority);
+          await addDoc(tasksCollection(teamId), {
+            title: issue.summary,
+            description: `Imported from Jira (${issue.issue_key})`,
+            status,
+            priority,
+            publishedByUid: user.uid,
+            assigneeUid: isAdmin ? null : user.uid,
+            assigneeLabel: "",
+            createdAt: now,
+            updatedAt: now,
+            dueAt: null,
+            completedAt: status === "done" ? now : null,
+            completedByUid: null,
+            timeEstimateMinutes: null,
+            timeSpentMinutes: null,
+            jiraIssueKey: issue.issue_key,
+          });
+          existingKeys.add(issue.issue_key);
+          imported += 1;
+        }
+
+        setJiraNotice(
+          imported > 0
+            ? `Imported ${imported} issue(s) from Jira project ${activeJiraProject}.`
+            : `Jira project ${activeJiraProject} is in sync (${issues.length} issue(s) checked).`,
+        );
+      } catch (e) {
+        setJiraNotice(
+          e instanceof Error ? e.message : "Failed to import from Jira.",
+        );
+      } finally {
+        setJiraBusy(false);
+      }
+    },
+    [jiraCreds, activeJiraProject, user, isAdmin, profile?.teamId],
+  );
+
+  useEffect(() => {
+    if (!profile?.jiraDefaultProject) return;
+    startTransition(() => {
+      setSelectedJiraProject(profile.jiraDefaultProject || "");
+    });
+  }, [profile?.jiraDefaultProject]);
+
+  useEffect(() => {
+    if (!jiraCreds) {
+      setJiraProjects([]);
+      setJiraLiveIssues([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const projects = await listJiraProjects(jiraCreds);
+        if (cancelled) return;
+        setJiraProjects(projects);
+        setSelectedJiraProject((current) => {
+          if (current) return current;
+          return (
+            projects.find((p) => p.key === profile?.jiraDefaultProject)?.key
+            ?? projects[0]?.key
+            ?? ""
+          );
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setJiraNotice(
+            e instanceof Error ? e.message : "Could not load Jira projects.",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jiraCreds, profile?.jiraDefaultProject]);
+
+  const loadJiraLiveIssues = useCallback(
+    async (force = false) => {
+      if (!jiraCreds || !activeJiraProject) {
+        setJiraLiveIssues([]);
+        return;
+      }
+      const loadKey = `${jiraCreds.domain}:${activeJiraProject}`;
+      if (!force && jiraIssuesLoadKeyRef.current === loadKey) return;
+      jiraIssuesLoadKeyRef.current = loadKey;
+
+      try {
+        const issues = await listJiraProjectIssues(
+          jiraCreds,
+          activeJiraProject,
+        );
+        setJiraLiveIssues(issues);
+      } catch (e) {
+        setJiraLiveIssues([]);
+        setJiraNotice(
+          e instanceof Error ? e.message : "Could not load Jira issues.",
+        );
+      }
+    },
+    [jiraCreds, activeJiraProject],
+  );
+
+  useEffect(() => {
+    void loadJiraLiveIssues(false);
+  }, [loadJiraLiveIssues]);
+
+  async function handleJiraProjectSelect(projectKey: string) {
+    setSelectedJiraProject(projectKey);
+    jiraImportKeyRef.current = null;
+    jiraIssuesLoadKeyRef.current = null;
+    if (!user) return;
+    try {
+      await updateDoc(doc(getFirestoreDb(), USERS_COLLECTION, user.uid), {
+        jiraDefaultProject: projectKey,
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      /* profile listener will still use local selection */
+    }
+  }
 
   useEffect(() => {
     if (!isAdmin || !profile?.teamId) return;
@@ -133,6 +329,7 @@ export function TasksBoard() {
             }
             setItems(next);
             setLoading(false);
+            setTasksReady(true);
             setError(null);
           },
           (e) => {
@@ -156,18 +353,77 @@ export function TasksBoard() {
     };
   }, [user, profile, isAdmin, uid]);
 
+  useEffect(() => {
+    if (!tasksReady || !activeJiraProject || !jiraCreds) return;
+    void importFromJira(false);
+  }, [tasksReady, activeJiraProject, jiraCreds, importFromJira]);
+
+  function taskRef(taskId: string) {
+    const teamId = profile?.teamId || DEMO_PROJECT_ID;
+    return doc(getFirestoreDb(), "projects", teamId, "tasks", taskId);
+  }
+
+  async function syncTaskToJira(
+    task: TaskDoc,
+    patch: Record<string, unknown>,
+  ): Promise<void> {
+    if (!jiraCreds || !task.jiraIssueKey) return;
+    const issueKey = task.jiraIssueKey;
+    try {
+      const fields: {
+        summary?: string;
+        description?: string;
+        priority?: TaskPriority;
+      } = {};
+      if (typeof patch.title === "string") fields.summary = patch.title;
+      if (typeof patch.description === "string") {
+        fields.description = patch.description;
+      }
+      if (typeof patch.priority === "string") {
+        fields.priority = patch.priority as TaskPriority;
+      }
+      if (Object.keys(fields).length > 0) {
+        await updateJiraIssue(jiraCreds, issueKey, fields);
+      }
+      if (typeof patch.status === "string") {
+        await syncJiraIssueStatus(
+          jiraCreds,
+          issueKey,
+          patch.status as TaskStatus,
+        );
+      }
+    } catch (e) {
+      setJiraNotice(
+        e instanceof Error ? e.message : "Jira sync failed for this task.",
+      );
+    }
+  }
+
   async function handleAddTask(e: React.FormEvent) {
     e.preventDefault();
-    if (!user || !isAdmin || !title.trim()) return;
+    if (!user || !title.trim()) return;
+    if (!isAdmin && !jiraCreds) {
+      setJiraNotice("Connect Jira in Settings to create tasks.");
+      return;
+    }
+    if (!activeJiraProject && jiraCreds) {
+      setJiraNotice("Select a Jira project below before creating a task.");
+      return;
+    }
     const now = serverTimestamp();
     const dueAt =
       dueLocal.trim() !== ""
         ? Timestamp.fromDate(new Date(dueLocal))
         : null;
-    const assignee = assigneeUid === "" ? null : assigneeUid;
+    const assignee = isAdmin
+      ? assigneeUid === ""
+        ? null
+        : assigneeUid
+      : user.uid;
     const teamId = profile?.teamId || DEMO_PROJECT_ID;
-    await addDoc(tasksCollection(teamId), {
-      title: title.trim(),
+    const trimmedTitle = title.trim();
+    const ref = await addDoc(tasksCollection(teamId), {
+      title: trimmedTitle,
       description: "",
       status: "todo" satisfies TaskStatus,
       priority,
@@ -183,53 +439,110 @@ export function TasksBoard() {
       timeSpentMinutes: null,
       jiraIssueKey: null,
     });
+
+    if (jiraCreds && activeJiraProject) {
+      setJiraBusy(true);
+      try {
+        const created = await createJiraIssue(jiraCreds, {
+          summary: trimmedTitle,
+          description: "",
+          priority,
+          project_key: activeJiraProject,
+        });
+        await updateDoc(ref, { jiraIssueKey: created.issue_key });
+        setJiraNotice(`Created Jira issue ${created.issue_key}.`);
+      } catch (err) {
+        setJiraNotice(
+          err instanceof Error
+            ? err.message
+            : "Task saved locally; Jira create failed.",
+        );
+      } finally {
+        setJiraBusy(false);
+      }
+    }
+
     setTitle("");
     setDueLocal("");
     setAssigneeUid("");
   }
 
-  async function patchTask(id: string, patch: Record<string, unknown>) {
-    const teamId = profile?.teamId || DEMO_PROJECT_ID;
-    const ref = doc(
-      getFirestoreDb(),
-      "projects",
-      teamId,
-      "tasks",
-      id,
-    );
-    await updateDoc(ref, {
+  async function patchTask(
+    id: string,
+    patch: Record<string, unknown>,
+    current?: TaskDoc,
+  ) {
+    await updateDoc(taskRef(id), {
       ...patch,
       updatedAt: serverTimestamp(),
     });
+    if (current) {
+      await syncTaskToJira({ ...current, ...patch } as TaskDoc, patch);
+    }
   }
 
-  async function removeTask(id: string) {
-    const teamId = profile?.teamId || DEMO_PROJECT_ID;
-    const ref = doc(
-      getFirestoreDb(),
-      "projects",
-      teamId,
-      "tasks",
-      id,
-    );
-    await deleteDoc(ref);
+  async function removeTask(id: string, data: TaskDoc) {
+    if (jiraCreds && data.jiraIssueKey) {
+      setJiraBusy(true);
+      try {
+        await deleteJiraIssue(jiraCreds, data.jiraIssueKey);
+      } catch (e) {
+        setJiraNotice(
+          e instanceof Error
+            ? e.message
+            : "Could not delete Jira issue; removing local task anyway.",
+        );
+      } finally {
+        setJiraBusy(false);
+      }
+    }
+    await deleteDoc(taskRef(id));
   }
 
-  async function markDone(id: string) {
+  async function linkTaskToJira(id: string, data: TaskDoc) {
+    if (!jiraCreds || data.jiraIssueKey) return;
+    setJiraBusy(true);
+    setJiraNotice(null);
+    try {
+      const created = await createJiraIssue(jiraCreds, {
+        summary: data.title,
+        description: data.description || "",
+        priority: data.priority,
+      });
+      await updateDoc(taskRef(id), { jiraIssueKey: created.issue_key });
+      setJiraNotice(`Linked to Jira issue ${created.issue_key}.`);
+    } catch (e) {
+      setJiraNotice(
+        e instanceof Error ? e.message : "Failed to create Jira issue.",
+      );
+    } finally {
+      setJiraBusy(false);
+    }
+  }
+
+  async function markDone(id: string, data: TaskDoc) {
     if (!user) return;
-    await patchTask(id, {
-      status: "done",
-      completedAt: serverTimestamp(),
-      completedByUid: user.uid,
-    });
+    await patchTask(
+      id,
+      {
+        status: "done",
+        completedAt: serverTimestamp(),
+        completedByUid: user.uid,
+      },
+      data,
+    );
   }
 
-  async function reopenTask(id: string) {
-    await patchTask(id, {
-      status: "todo",
-      completedAt: null,
-      completedByUid: null,
-    });
+  async function reopenTask(id: string, data: TaskDoc) {
+    await patchTask(
+      id,
+      {
+        status: "todo",
+        completedAt: null,
+        completedByUid: null,
+      },
+      data,
+    );
   }
 
   if (authLoading) {
@@ -277,6 +590,108 @@ export function TasksBoard() {
 
   return (
     <div className="space-y-8">
+      {jiraNotice ? (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-950/30 px-3 py-2 text-sm text-amber-100">
+          {jiraNotice}
+        </p>
+      ) : null}
+      {!jiraCreds ? (
+        <p className="text-xs text-app-muted">
+          Connect Jira in{" "}
+          <a href="/settings" className="text-app-accent underline">
+            Settings
+          </a>{" "}
+          to sync tasks with your board.
+        </p>
+      ) : (
+        <div className="rounded-xl border border-app-border bg-app-elevated/80 p-4 ring-1 ring-white/[0.04]">
+          <p className="text-sm font-medium text-app-text">Jira</p>
+          <p className="mt-1 text-xs text-app-muted">
+            Connected to {profile.jiraDomain}
+            {jiraBusy ? " · syncing…" : ""}
+          </p>
+          {jiraProjects.length > 0 ? (
+            <div className="mt-3">
+              <label className="mb-1 block text-xs font-medium text-app-muted">
+                Your Jira projects
+              </label>
+              <select
+                value={activeJiraProject}
+                onChange={(e) => void handleJiraProjectSelect(e.target.value)}
+                className="w-full max-w-md rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text"
+              >
+                {jiraProjects.map((p) => (
+                  <option key={p.id} value={p.key}>
+                    {p.key} — {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-app-muted">Loading projects…</p>
+          )}
+          {activeJiraProject ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={jiraBusy}
+                onClick={() => {
+                  jiraIssuesLoadKeyRef.current = null;
+                  void loadJiraLiveIssues(true);
+                }}
+                className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text hover:border-app-accent disabled:opacity-50"
+              >
+                Refresh Jira list
+              </button>
+              <button
+                type="button"
+                disabled={jiraBusy}
+                onClick={() => {
+                  jiraImportKeyRef.current = null;
+                  void importFromJira(true);
+                }}
+                className="rounded-lg border border-app-accent/40 px-3 py-1.5 text-xs font-medium text-app-accent hover:bg-app-accent/10 disabled:opacity-50"
+              >
+                Import into task board
+              </button>
+            </div>
+          ) : null}
+          {jiraLiveIssues.length > 0 ? (
+            <div className="mt-4">
+              <h3 className="text-xs font-medium uppercase tracking-wide text-app-muted">
+                Issues in {activeJiraProject} ({jiraLiveIssues.length})
+              </h3>
+              <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
+                {jiraLiveIssues.map((issue) => (
+                  <li
+                    key={issue.issue_key}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-app-border/60 bg-app-bg/80 px-2 py-1.5"
+                  >
+                    <span className="text-app-text">{issue.summary}</span>
+                    <span className="text-xs text-app-muted">
+                      <a
+                        href={issue.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-mono text-app-accent underline"
+                      >
+                        {issue.issue_key}
+                      </a>
+                      {" · "}
+                      {issue.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : activeJiraProject && !jiraBusy ? (
+            <p className="mt-3 text-xs text-app-muted">
+              No issues in project {activeJiraProject} (or still loading).
+            </p>
+          ) : null}
+        </div>
+      )}
+
       <p className="text-sm text-app-muted">
         Signed in as <span className="font-medium text-app-text">{profile.displayName}</span> ·{" "}
         <span className="capitalize text-app-accent">{profile.role}</span>
@@ -291,12 +706,20 @@ export function TasksBoard() {
         )}
       </p>
 
-      {isAdmin ? (
+      {isAdmin || jiraCreds ? (
         <form
           onSubmit={handleAddTask}
           className="flex flex-col gap-3 rounded-xl border border-app-border bg-app-elevated/80 p-4 ring-1 ring-white/[0.04]"
         >
-          <p className="text-sm font-medium text-app-text">Publish task (admin)</p>
+          <p className="text-sm font-medium text-app-text">
+            {isAdmin ? "Publish task (admin)" : "Create task in Jira"}
+          </p>
+          {!isAdmin && activeJiraProject ? (
+            <p className="text-xs text-app-muted">
+              New tasks are assigned to you and created in project{" "}
+              <span className="font-mono text-app-accent">{activeJiraProject}</span>.
+            </p>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm sm:col-span-2">
               <span className="text-app-muted">Title</span>
@@ -331,27 +754,30 @@ export function TasksBoard() {
                 ))}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-              <span className="text-app-muted">Assign to</span>
-              <select
-                className="rounded-lg border border-app-border bg-app-bg px-3 py-2 text-app-text focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
-                value={assigneeUid}
-                onChange={(e) => setAssigneeUid(e.target.value)}
-              >
-                <option value="">Unassigned (admin only)</option>
-                {workers.map((w) => (
-                  <option key={w.uid} value={w.uid}>
-                    {w.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {isAdmin ? (
+              <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+                <span className="text-app-muted">Assign to</span>
+                <select
+                  className="rounded-lg border border-app-border bg-app-bg px-3 py-2 text-app-text focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+                  value={assigneeUid}
+                  onChange={(e) => setAssigneeUid(e.target.value)}
+                >
+                  <option value="">Unassigned</option>
+                  {workers.map((w) => (
+                    <option key={w.uid} value={w.uid}>
+                      {w.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
           </div>
           <button
             type="submit"
-            className="w-fit rounded-lg bg-app-accent px-4 py-2 text-sm font-semibold text-app-on-accent hover:bg-app-accent-bright"
+            disabled={jiraBusy || (!!jiraCreds && !activeJiraProject)}
+            className="w-fit rounded-lg bg-app-accent px-4 py-2 text-sm font-semibold text-app-on-accent hover:bg-app-accent-bright disabled:opacity-50"
           >
-            Publish task
+            {jiraCreds ? "Create task & send to Jira" : "Publish task"}
           </button>
         </form>
       ) : null}
@@ -392,15 +818,32 @@ export function TasksBoard() {
                   ) : null}
                   {data.jiraIssueKey ? (
                     <p className="mt-1 text-xs text-amber-400/90">
-                      Jira: {data.jiraIssueKey}
+                      Jira:{" "}
+                      <a
+                        href={`https://${jiraCreds?.domain || profile.jiraDomain}/browse/${data.jiraIssueKey}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline hover:text-amber-300"
+                      >
+                        {data.jiraIssueKey}
+                      </a>
                     </p>
+                  ) : isAdmin && jiraCreds ? (
+                    <button
+                      type="button"
+                      disabled={jiraBusy}
+                      onClick={() => void linkTaskToJira(id, data)}
+                      className="mt-1 text-xs text-app-accent underline hover:text-app-accent-bright disabled:opacity-50"
+                    >
+                      Create in Jira
+                    </button>
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {!isAdmin && data.status !== "done" ? (
                     <button
                       type="button"
-                      onClick={() => markDone(id)}
+                      onClick={() => void markDone(id, data)}
                       className="rounded-lg bg-app-accent px-3 py-1.5 text-sm font-medium text-app-on-accent hover:bg-app-accent-bright"
                     >
                       Mark done
@@ -409,7 +852,7 @@ export function TasksBoard() {
                   {isAdmin && data.status === "done" ? (
                     <button
                       type="button"
-                      onClick={() => reopenTask(id)}
+                      onClick={() => void reopenTask(id, data)}
                       className="text-sm text-app-muted underline hover:text-app-accent"
                     >
                       Reopen
@@ -418,7 +861,7 @@ export function TasksBoard() {
                   {isAdmin ? (
                     <button
                       type="button"
-                      onClick={() => removeTask(id)}
+                      onClick={() => void removeTask(id, data)}
                       className="text-sm text-red-400 hover:underline"
                     >
                       Delete
@@ -435,7 +878,11 @@ export function TasksBoard() {
                     className="rounded-lg border border-app-border bg-app-bg px-2 py-1.5 text-sm text-app-text disabled:opacity-60"
                     value={data.status}
                     onChange={(e) =>
-                      patchTask(id, { status: e.target.value as TaskStatus })
+                      void patchTask(
+                        id,
+                        { status: e.target.value as TaskStatus },
+                        data,
+                      )
                     }
                   >
                     {STATUSES.map((s) => (
@@ -452,9 +899,11 @@ export function TasksBoard() {
                     className="rounded-lg border border-app-border bg-app-bg px-2 py-1.5 text-sm text-app-text disabled:opacity-60"
                     value={data.priority}
                     onChange={(e) =>
-                      patchTask(id, {
-                        priority: e.target.value as TaskPriority,
-                      })
+                      void patchTask(
+                        id,
+                        { priority: e.target.value as TaskPriority },
+                        data,
+                      )
                     }
                   >
                     {PRIORITIES.map((p) => (

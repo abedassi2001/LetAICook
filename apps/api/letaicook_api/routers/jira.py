@@ -123,6 +123,36 @@ class TransitionResponse(BaseModel):
     new_status: str
 
 
+class UpdateJiraIssueRequest(BaseModel):
+    """Partial update — only provided fields are sent to Jira."""
+
+    summary: str | None = Field(default=None, min_length=1, max_length=500)
+    description: str | None = None
+    priority: str | None = Field(
+        default=None,
+        description="letAICook priority (low/medium/high/critical) or Jira name.",
+    )
+
+
+class UpdateJiraIssueResponse(BaseModel):
+    issue_key: str
+    issue_url: str
+
+
+class DeleteJiraIssueResponse(BaseModel):
+    ok: bool
+    issue_key: str
+
+
+class SyncStatusRequest(BaseModel):
+    """Map a letAICook task status to a Jira workflow transition."""
+
+    status: str = Field(
+        ...,
+        description="letAICook status: todo, in_progress, review, done, blocked.",
+    )
+
+
 class BatchCreateRequest(BaseModel):
     """Create multiple Jira issues at once (e.g. from system designer output)."""
     project_key: str | None = None
@@ -138,6 +168,15 @@ class JiraProject(BaseModel):
     key: str
     name: str
     id: str
+
+
+class JiraIssueListItem(BaseModel):
+    issue_key: str
+    summary: str
+    status: str
+    status_category: str
+    priority: str | None = None
+    url: str
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +219,158 @@ def _adf_text(text: str) -> dict[str, Any]:
             }
         ],
     }
+
+
+def _resolve_priority(priority: str | None) -> str | None:
+    """Accept letAICook or Jira priority names."""
+    if not priority:
+        return None
+    mapped = _map_priority(priority)
+    return mapped if mapped else priority
+
+
+def _parse_search_issues_payload(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize Jira search / search/jql responses to a list of issue objects."""
+    return list(data.get("issues") or data.get("values") or [])
+
+
+def _search_jira_issues(
+    base_url: str,
+    auth: HTTPBasicAuth,
+    jql: str,
+    max_results: int,
+) -> list[dict[str, Any]]:
+    """Search issues via Jira Cloud JQL API (new search/jql, with legacy fallback)."""
+    limit = min(max(max_results, 1), 100)
+    fields_csv = "summary,status,priority"
+
+    resp = requests.get(
+        f"{base_url}/rest/api/3/search/jql",
+        headers=_HEADERS,
+        auth=auth,
+        params={
+            "jql": jql,
+            "maxResults": limit,
+            "fields": fields_csv,
+        },
+        timeout=15,
+    )
+    if resp.status_code == 200:
+        return _parse_search_issues_payload(resp.json())
+
+    if resp.status_code in (400, 404, 410, 405):
+        resp = requests.post(
+            f"{base_url}/rest/api/3/search/jql",
+            headers=_HEADERS,
+            auth=auth,
+            json={
+                "jql": jql,
+                "maxResults": limit,
+                "fields": ["summary", "status", "priority"],
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            return _parse_search_issues_payload(resp.json())
+
+    # Legacy endpoint (removed on many Cloud sites; kept as last resort).
+    resp = requests.get(
+        f"{base_url}/rest/api/3/search",
+        headers=_HEADERS,
+        auth=auth,
+        params={
+            "jql": jql,
+            "maxResults": limit,
+            "fields": fields_csv,
+        },
+        timeout=15,
+    )
+    if resp.status_code == 200:
+        return _parse_search_issues_payload(resp.json())
+
+    raise HTTPException(
+        status_code=502,
+        detail=f"Jira search failed ({resp.status_code}): {resp.text[:400]}",
+    )
+
+
+def _issues_to_list_items(
+    base_url: str, issues: list[dict[str, Any]]
+) -> list[JiraIssueListItem]:
+    results: list[JiraIssueListItem] = []
+    for item in issues:
+        key = item.get("key", "")
+        fields = item.get("fields", {})
+        status_obj = fields.get("status") or {}
+        priority_obj = fields.get("priority")
+        results.append(
+            JiraIssueListItem(
+                issue_key=key,
+                summary=fields.get("summary") or key,
+                status=status_obj.get("name", "Unknown"),
+                status_category=status_obj.get("statusCategory", {}).get(
+                    "name", "Unknown"
+                ),
+                priority=priority_obj.get("name") if priority_obj else None,
+                url=f"{base_url}/browse/{key}",
+            )
+        )
+    return results
+
+
+def _perform_transition(
+    base_url: str,
+    auth: HTTPBasicAuth,
+    issue_key: str,
+    transition_names: list[str],
+) -> TransitionResponse:
+    resp = requests.get(
+        f"{base_url}/rest/api/3/issue/{issue_key}/transitions",
+        headers=_HEADERS,
+        auth=auth,
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to fetch transitions for {issue_key}: {resp.text[:300]}",
+        )
+
+    transitions = resp.json().get("transitions", [])
+    names_lower = {t["name"].lower(): t for t in transitions}
+    match = None
+    for candidate in transition_names:
+        match = names_lower.get(candidate.lower())
+        if match:
+            break
+    if not match:
+        available = [t["name"] for t in transitions]
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"No matching transition for {issue_key}. "
+                f"Tried: {transition_names}. Available: {available}"
+            ),
+        )
+
+    resp = requests.post(
+        f"{base_url}/rest/api/3/issue/{issue_key}/transitions",
+        headers=_HEADERS,
+        auth=auth,
+        json={"transition": {"id": match["id"]}},
+        timeout=10,
+    )
+    if resp.status_code not in (200, 204):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Transition failed ({resp.status_code}): {resp.text[:300]}",
+        )
+
+    return TransitionResponse(
+        ok=True,
+        issue_key=issue_key,
+        new_status=match.get("to", {}).get("name", match["name"]),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +435,19 @@ def list_jira_projects(config: tuple[str, HTTPBasicAuth, str | None] = Depends(g
         JiraProject(key=p["key"], name=p["name"], id=str(p["id"]))
         for p in projects
     ]
+
+
+@router.get("/projects/{project_key}/issues", response_model=list[JiraIssueListItem])
+def list_jira_project_issues(
+    project_key: str,
+    max_results: int = 50,
+    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+) -> list[JiraIssueListItem]:
+    """List issues in a Jira project (for importing into letAICook tasks)."""
+    base_url, auth, _ = config
+    jql = f'project = "{project_key}" ORDER BY updated DESC'
+    issues = _search_jira_issues(base_url, auth, jql, max_results)
+    return _issues_to_list_items(base_url, issues)
 
 
 @router.post("/issues", response_model=CreateJiraIssueResponse)
@@ -340,53 +544,92 @@ def transition_jira_issue(
 ) -> TransitionResponse:
     """Transition a Jira issue to a new status (e.g. 'In Progress', 'Done')."""
     base_url, auth, _ = config
+    return _perform_transition(
+        base_url, auth, issue_key, [body.transition_name]
+    )
 
-    # 1. Get available transitions
-    resp = requests.get(
-        f"{base_url}/rest/api/3/issue/{issue_key}/transitions",
+
+@router.put("/issues/{issue_key}", response_model=UpdateJiraIssueResponse)
+def update_jira_issue(
+    issue_key: str,
+    body: UpdateJiraIssueRequest,
+    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+) -> UpdateJiraIssueResponse:
+    """Update summary, description, and/or priority of a Jira issue."""
+    base_url, auth, _ = config
+    fields: dict[str, Any] = {}
+    if body.summary is not None:
+        fields["summary"] = body.summary
+    if body.description is not None:
+        fields["description"] = _adf_text(body.description)
+    mapped_priority = _resolve_priority(body.priority)
+    if body.priority is not None and mapped_priority:
+        fields["priority"] = {"name": mapped_priority}
+
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+
+    resp = requests.put(
+        f"{base_url}/rest/api/3/issue/{issue_key}",
         headers=_HEADERS,
         auth=auth,
-        timeout=10,
+        json={"fields": fields},
+        timeout=15,
     )
-    if resp.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to fetch transitions for {issue_key}: {resp.text[:300]}",
-        )
-
-    transitions = resp.json().get("transitions", [])
-    target = body.transition_name.lower()
-    match = next(
-        (t for t in transitions if t["name"].lower() == target),
-        None,
-    )
-    if not match:
-        available = [t["name"] for t in transitions]
-        raise HTTPException(
-            status_code=400,
-            detail=f"Transition '{body.transition_name}' not available for {issue_key}. "
-                   f"Available: {available}",
-        )
-
-    # 2. Perform transition
-    resp = requests.post(
-        f"{base_url}/rest/api/3/issue/{issue_key}/transitions",
-        headers=_HEADERS,
-        auth=auth,
-        json={"transition": {"id": match["id"]}},
-        timeout=10,
-    )
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"Issue {issue_key} not found in Jira.")
     if resp.status_code not in (200, 204):
         raise HTTPException(
             status_code=502,
-            detail=f"Transition failed ({resp.status_code}): {resp.text[:300]}",
+            detail=f"Jira update failed ({resp.status_code}): {resp.text[:500]}",
         )
 
-    return TransitionResponse(
-        ok=True,
+    return UpdateJiraIssueResponse(
         issue_key=issue_key,
-        new_status=match.get("to", {}).get("name", body.transition_name),
+        issue_url=f"{base_url}/browse/{issue_key}",
     )
+
+
+@router.delete("/issues/{issue_key}", response_model=DeleteJiraIssueResponse)
+def delete_jira_issue(
+    issue_key: str,
+    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+) -> DeleteJiraIssueResponse:
+    """Delete a Jira issue."""
+    base_url, auth, _ = config
+    resp = requests.delete(
+        f"{base_url}/rest/api/3/issue/{issue_key}",
+        headers=_HEADERS,
+        auth=auth,
+        timeout=15,
+    )
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"Issue {issue_key} not found in Jira.")
+    if resp.status_code not in (200, 204):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Jira delete failed ({resp.status_code}): {resp.text[:500]}",
+        )
+    return DeleteJiraIssueResponse(ok=True, issue_key=issue_key)
+
+
+@router.post("/issues/{issue_key}/sync-status", response_model=TransitionResponse)
+def sync_jira_issue_status(
+    issue_key: str,
+    body: SyncStatusRequest,
+    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+) -> TransitionResponse:
+    """Transition a Jira issue using letAICook task status names."""
+    base_url, auth, _ = config
+    key = body.status.lower().strip()
+    candidates = _STATUS_TO_TRANSITION.get(key)
+    if not candidates:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown letAICook status '{body.status}'. "
+            f"Expected one of: {list(_STATUS_TO_TRANSITION)}",
+        )
+    return _perform_transition(base_url, auth, issue_key, candidates)
 
 
 @router.post("/issues/batch", response_model=BatchCreateResponse)
