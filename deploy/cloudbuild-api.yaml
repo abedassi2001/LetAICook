@@ -1,0 +1,43 @@
+# Build and deploy FastAPI to Cloud Run.
+# Usage (from repo root, after gcloud auth):
+#   gcloud builds submit --config deploy/cloudbuild-api.yaml --substitutions=_REGION=us-central1,_SERVICE=letaicook-api
+#
+# Set secrets in Cloud Run separately (GOOGLE_API_KEY, CORS_ORIGINS).
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - apps/api/Dockerfile.prod
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/letaicook/${_SERVICE}:$SHORT_SHA
+      - apps/api
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/letaicook/${_SERVICE}:$SHORT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/letaicook/${_SERVICE}:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --port=8080
+      - --min-instances=0
+      - --max-instances=10
+      - --memory=512Mi
+      - --cpu=1
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE: letaicook-api
+
+options:
+  logging: CLOUD_LOGGING_ONLY
