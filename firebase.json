@@ -3,6 +3,13 @@
     "rules": "firebase/firestore.rules",
     "indexes": "firebase/firestore.indexes.json"
   },
+  "hosting": {
+    "source": "apps/web",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "frameworksBackend": {
+      "region": "us-central1"
+    }
+  },
   "emulators": {
     "auth": { "port": 9099 },
     "firestore": { "port": 8080 },

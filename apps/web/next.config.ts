@@ -12,6 +12,8 @@ const apiProxyTarget = process.env.LETAICOOK_API_PROXY_TARGET?.trim().replace(
 );
 
 const nextConfig: NextConfig = {
+  /** Cloud Run Docker image (`apps/web/Dockerfile.prod` sets DOCKER_BUILD=true). */
+  ...(process.env.DOCKER_BUILD === "true" ? { output: "standalone" as const } : {}),
   /** Monorepo / stray lockfiles: trace and resolve from this app only. */
   outputFileTracingRoot: appRoot,
   turbopack: {

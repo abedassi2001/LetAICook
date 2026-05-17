@@ -1,0 +1,119 @@
+# Deploy letAIcook to Google Cloud / Firebase on push to main (or manual dispatch).
+#
+# Required GitHub repository secrets:
+#   GCP_PROJECT_ID          — Firebase / GCP project id (e.g. letaicook)
+#   GCP_SA_KEY              — JSON key for a deploy service account
+#   GOOGLE_API_KEY          — Gemini API key for Cloud Run
+#   FIREBASE_WEB_API_KEY    — NEXT_PUBLIC_FIREBASE_API_KEY
+#   FIREBASE_AUTH_DOMAIN    — NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+#   FIREBASE_PROJECT_ID     — NEXT_PUBLIC_FIREBASE_PROJECT_ID
+#   FIREBASE_STORAGE_BUCKET — NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+#   FIREBASE_MESSAGING_SENDER_ID
+#   FIREBASE_APP_ID
+#   FIREBASE_TOKEN          — firebase login:ci token for hosting deploy
+#
+# Optional vars (repository variables):
+#   GCP_REGION              — default us-central1
+#   CLOUD_RUN_SERVICE       — default letaicook-api
+
+name: Deploy to Firebase / Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-api:
+    runs-on: ubuntu-latest
+    outputs:
+      api_url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Enable APIs
+        run: |
+          gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
+
+      - name: Ensure Artifact Registry repo
+        run: |
+          gcloud artifacts repositories describe letaicook \
+            --location=${{ vars.GCP_REGION || 'us-central1' }} 2>/dev/null || \
+          gcloud artifacts repositories create letaicook \
+            --repository-format=docker \
+            --location=${{ vars.GCP_REGION || 'us-central1' }}
+
+      - name: Build and deploy API to Cloud Run
+        id: deploy
+        env:
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+          SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'letaicook-api' }}
+          WEB_ORIGIN: https://${{ secrets.GCP_PROJECT_ID }}.web.app
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/letaicook/${SERVICE}:${GITHUB_SHA}"
+          docker build -f apps/api/Dockerfile.prod -t "$IMAGE" apps/api
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker push "$IMAGE"
+          CORS="${WEB_ORIGIN},https://${{ secrets.GCP_PROJECT_ID }}.firebaseapp.com,http://localhost:3000"
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 \
+            --set-env-vars "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" \
+            --set-env-vars "CORS_ORIGINS=${CORS}"
+          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+  deploy-web:
+    needs: deploy-api
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Write production env for Next build
+        working-directory: apps/web
+        env:
+          API_URL: ${{ needs.deploy-api.outputs.api_url }}
+        run: |
+          cat > .env.production.local << EOF
+          NEXT_PUBLIC_FIREBASE_API_KEY=${{ secrets.FIREBASE_WEB_API_KEY }}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          NEXT_PUBLIC_FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }}
+          NEXT_PUBLIC_API_BASE_URL=${API_URL}
+          EOF
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Deploy Firestore rules + Hosting
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          firebase deploy --only firestore:rules,hosting --project "${{ secrets.GCP_PROJECT_ID }}" --non-interactive --token "$FIREBASE_TOKEN"
