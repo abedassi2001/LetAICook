@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "firebase": "^12.13.0",
+    "framer-motion": "^12.38.0",
     "html2canvas": "^1.4.1",
     "mermaid": "^11.14.0",
     "next": "16.2.6",
@@ -21,7 +22,6 @@
     "reactflow": "^11.11.4"
   },
   "devDependencies": {
-    "vitest": "^3.2.4",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -29,6 +29,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }

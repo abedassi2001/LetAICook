@@ -1,7 +1,10 @@
 "use client";
 
+import { GlassCard } from "@/components/ui/glass-card";
 import { useAuth } from "@/contexts/auth-context";
 import { useState } from "react";
+
+const inputClass = "app-input";
 
 export function AuthForm() {
   const { signInEmail, signUpEmail } = useAuth();
@@ -36,8 +39,8 @@ export function AuthForm() {
   }
 
   return (
-    <div className="w-full max-w-md space-y-5">
-      <div className="flex gap-2 rounded-xl bg-app-elevated p-1 ring-1 ring-app-border">
+    <GlassCard strong className="w-full max-w-md space-y-5 p-6">
+      <div className="flex gap-2 rounded-xl bg-app-bg/50 p-1 ring-1 ring-app-border/80">
         <button
           type="button"
           className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
@@ -68,7 +71,7 @@ export function AuthForm() {
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="text-app-muted">Name</span>
               <input
-                className="rounded-xl border border-app-border bg-app-bg px-4 py-2.5 text-app-text placeholder:text-app-muted/60 focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+                className={inputClass}
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 required
@@ -77,7 +80,7 @@ export function AuthForm() {
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="text-app-muted">Team ID (Shared with your team)</span>
               <input
-                className="rounded-xl border border-app-border bg-app-bg px-4 py-2.5 text-app-text placeholder:text-app-muted/60 focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+                className={inputClass}
                 value={teamId}
                 onChange={(e) => setTeamId(e.target.value)}
                 placeholder="e.g. startup-x"
@@ -99,7 +102,7 @@ export function AuthForm() {
           <span className="text-app-muted">Email</span>
           <input
             type="email"
-            className="rounded-xl border border-app-border bg-app-bg px-4 py-2.5 text-app-text placeholder:text-app-muted/60 focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+            className={inputClass}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
@@ -110,7 +113,7 @@ export function AuthForm() {
           <span className="text-app-muted">Password</span>
           <input
             type="password"
-            className="rounded-xl border border-app-border bg-app-bg px-4 py-2.5 text-app-text placeholder:text-app-muted/60 focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+            className={inputClass}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
@@ -125,11 +128,11 @@ export function AuthForm() {
         <button
           type="submit"
           disabled={busy}
-          className="w-full rounded-xl bg-app-accent py-3 text-sm font-semibold text-app-on-accent hover:bg-app-accent-bright disabled:opacity-50"
+          className="btn-primary w-full py-3"
         >
           {busy ? "Please wait…" : authMode === "signin" ? "Sign in" : "Create account"}
         </button>
       </form>
-    </div>
+    </GlassCard>
   );
 }
