@@ -72,6 +72,7 @@ jobs:
             --region "$REGION" \
             --platform managed \
             --allow-unauthenticated \
+            --ingress all \
             --port 8080 \
             --set-env-vars "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" \
             --set-env-vars "CORS_ORIGINS=${CORS}"
