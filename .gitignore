@@ -8,10 +8,14 @@ venv/
 .env
 .env.*
 !.env.example
+deploy/cloudrun-env.yaml
 
 # Firebase / GCP service accounts (never commit)
 *credentials*.json
 *firebase-adminsdk*.json
+
+# Firebase local build output
+.firebase/
 
 # Node / Next
 node_modules/

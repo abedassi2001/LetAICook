@@ -1,0 +1,8 @@
+# Copy to deploy/cloudrun-env.yaml (gitignored) and fill in your Gemini key.
+# Apply to Cloud Run:
+#   .\scripts\set-cloudrun-env.ps1
+#
+# Or: gcloud run services update letaicook-api --region us-central1 --env-vars-file deploy/cloudrun-env.yaml
+
+GOOGLE_API_KEY: "YOUR_GEMINI_API_KEY"
+CORS_ORIGINS: "https://letaicook.web.app,https://letaicook.firebaseapp.com,http://localhost:3000"

@@ -59,12 +59,12 @@ Or bash:
 ./scripts/deploy-api-cloudrun.sh letaicook us-central1
 ```
 
-Set secrets on the service (replace values):
+Set secrets with an env file (required on Windows — `CORS_ORIGINS` contains commas):
 
-```bash
-gcloud run services update letaicook-api --region us-central1 \
-  --set-env-vars "GOOGLE_API_KEY=your-gemini-key" \
-  --set-env-vars "CORS_ORIGINS=https://letaicook.web.app,https://letaicook.firebaseapp.com,http://localhost:3000"
+```powershell
+copy deploy\cloudrun-env.sample.yaml deploy\cloudrun-env.yaml
+# Edit deploy\cloudrun-env.yaml — add GOOGLE_API_KEY from https://aistudio.google.com/apikey
+.\scripts\set-cloudrun-env.ps1
 ```
 
 Note the **API URL** printed at the end (e.g. `https://letaicook-api-xxxxx-uc.a.run.app`).
@@ -87,9 +87,11 @@ Do **not** set `NEXT_PUBLIC_USE_FIREBASE_EMULATOR` in production.
 
 ### Step C — Deploy Firestore rules + Hosting
 
-```bash
-firebase deploy --only firestore:rules,hosting --project letaicook
+```powershell
+.\scripts\deploy-hosting.ps1 -ProjectId letaicook
 ```
+
+This runs `prepare-hosting-deploy.ps1` (Cloud Run URL + Firebase vars from `.env.local`) then `firebase deploy`.
 
 Your app is live at:
 
@@ -125,6 +127,23 @@ Add these **GitHub repository secrets**:
 | `FIREBASE_APP_ID` | appId |
 
 Optional variable: `GCP_REGION` (default `us-central1`).
+
+---
+
+## Take production offline / bring it back
+
+**Shutdown** (Hosting disabled + API not reachable from the internet):
+
+```powershell
+.\scripts\shutdown-production.ps1 -ProjectId letaicook
+```
+
+**Full redeploy** after fixes (env file, API, restore public ingress, web):
+
+```powershell
+# Ensure deploy\cloudrun-env.yaml exists with GOOGLE_API_KEY and CORS_ORIGINS
+.\scripts\redeploy-production.ps1 -ProjectId letaicook
+```
 
 ---
 

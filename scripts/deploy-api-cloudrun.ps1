@@ -11,42 +11,64 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $RepoRoot
 
+. (Join-Path $RepoRoot "scripts\lib\gcloud-path.ps1")
+$Gcloud = Assert-GcloudInstalled
+
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Write-Host "ERROR: Docker is not installed or not on PATH. Install Docker Desktop and try again." -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "Project: $ProjectId  Region: $Region  Service: $Service"
+Write-Host "Using gcloud: $Gcloud"
 
-gcloud config set project $ProjectId
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com --quiet
+& $Gcloud config set project $ProjectId
+& $Gcloud services enable run.googleapis.com artifactregistry.googleapis.com --quiet
 
-$repoExists = gcloud artifacts repositories describe letaicook --location=$Region 2>$null
+# NOT_FOUND is expected when the repo does not exist yet — do not treat as fatal.
+$prevErrorAction = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& $Gcloud artifacts repositories describe letaicook --location=$Region 2>$null | Out-Null
+$repoExists = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $prevErrorAction
+
 if (-not $repoExists) {
-    gcloud artifacts repositories create letaicook `
+    Write-Host "Creating Artifact Registry repository 'letaicook' in $Region ..."
+    & $Gcloud artifacts repositories create letaicook `
         --repository-format=docker `
         --location=$Region
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Failed to create Artifact Registry repository." -ForegroundColor Red
+        exit 1
+    }
 }
 
 $Image = "${Region}-docker.pkg.dev/${ProjectId}/letaicook/${Service}:latest"
 Write-Host "Building $Image ..."
 docker build -f apps/api/Dockerfile.prod -t $Image apps/api
 
-gcloud auth configure-docker "${Region}-docker.pkg.dev" --quiet
+& $Gcloud auth configure-docker "${Region}-docker.pkg.dev" --quiet
 docker push $Image
 
 Write-Host "Deploying to Cloud Run..."
-gcloud run deploy $Service `
+& $Gcloud run deploy $Service `
     --image $Image `
     --region $Region `
     --platform managed `
     --allow-unauthenticated `
+    --ingress all `
     --port 8080 `
     --memory 512Mi `
     --cpu 1
 
-$Url = gcloud run services describe $Service --region $Region --format="value(status.url)"
+$Url = & $Gcloud run services describe $Service --region $Region --format="value(status.url)"
 Write-Host ""
 Write-Host "API URL: $Url"
 Write-Host ""
 Write-Host "Next steps:"
-Write-Host "  1. Set secrets:"
-Write-Host "     gcloud run services update $Service --region $Region --set-env-vars GOOGLE_API_KEY=YOUR_KEY"
-Write-Host "     gcloud run services update $Service --region $Region --set-env-vars CORS_ORIGINS=https://${ProjectId}.web.app,https://${ProjectId}.firebaseapp.com,http://localhost:3000"
-Write-Host "  2. Set apps/web/.env.production.local NEXT_PUBLIC_API_BASE_URL=$Url"
-Write-Host "  3. firebase deploy --only firestore:rules,hosting --project $ProjectId"
+Write-Host "  1. Set API secrets (avoids comma/CORS gcloud errors on Windows):"
+Write-Host "       copy deploy\cloudrun-env.sample.yaml deploy\cloudrun-env.yaml"
+Write-Host "       Edit GOOGLE_API_KEY, then: .\scripts\set-cloudrun-env.ps1"
+Write-Host "  2. Deploy website:"
+Write-Host "       .\scripts\deploy-hosting.ps1 -ProjectId $ProjectId"
+Write-Host "     (auto-fills apps/web/.env.production.local with API URL $Url)"
