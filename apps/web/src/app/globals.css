@@ -1,29 +1,43 @@
 @import "tailwindcss";
 
-/* Dark console: near-black + modern green accents */
+/* Premium AI workspace — deep space + emerald + violet glow */
 :root {
-  --app-bg: #030503;
-  --app-sidebar: #050805;
-  --app-elevated: #0a100c;
-  --app-border: #142818;
-  --app-text: #e6ebe8;
-  --app-muted: #7d8f82;
-  --app-accent: #34d399;
-  --app-accent-bright: #4ade80;
-  --app-accent-dim: #059669;
-  --app-on-accent: #031105;
+  --app-bg: #050608;
+  --app-bg-elevated: #0c0f14;
+  --app-sidebar: #07090d;
+  --app-elevated: #11161f;
+  --app-surface: #161d28;
+  --app-border: #1f2a3a;
+  --app-border-bright: #2d3d52;
+  --app-text: #f0f4f8;
+  --app-muted: #8b9cb0;
+  --app-accent: #2dd4bf;
+  --app-accent-bright: #5eead4;
+  --app-accent-dim: #0d9488;
+  --app-violet: #a78bfa;
+  --app-violet-dim: #7c3aed;
+  --app-on-accent: #042f2e;
+  --app-glow: rgba(45, 212, 191, 0.35);
+  --app-glow-violet: rgba(167, 139, 250, 0.25);
+  --app-radius: 1rem;
+  --app-radius-lg: 1.25rem;
 }
 
 @theme inline {
   --color-app-bg: var(--app-bg);
+  --color-app-bg-elevated: var(--app-bg-elevated);
   --color-app-sidebar: var(--app-sidebar);
   --color-app-elevated: var(--app-elevated);
+  --color-app-surface: var(--app-surface);
   --color-app-border: var(--app-border);
+  --color-app-border-bright: var(--app-border-bright);
   --color-app-text: var(--app-text);
   --color-app-muted: var(--app-muted);
   --color-app-accent: var(--app-accent);
   --color-app-accent-bright: var(--app-accent-bright);
   --color-app-accent-dim: var(--app-accent-dim);
+  --color-app-violet: var(--app-violet);
+  --color-app-violet-dim: var(--app-violet-dim);
   --color-app-on-accent: var(--app-on-accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
@@ -31,10 +45,177 @@
 
 html {
   color-scheme: dark;
+  scroll-behavior: smooth;
 }
 
 body {
   background: var(--app-bg);
   color: var(--app-text);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--app-accent) 35%, transparent);
+  color: var(--app-text);
+}
+
+/* Ambient mesh behind content */
+.app-mesh {
+  background-color: var(--app-bg);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 20% -10%, var(--app-glow-violet), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 90% 10%, var(--app-glow), transparent 50%),
+    radial-gradient(ellipse 50% 30% at 50% 100%, rgba(13, 148, 136, 0.12), transparent 45%);
+}
+
+/* Glass panels */
+.glass-panel {
+  background: color-mix(in srgb, var(--app-elevated) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-border-bright) 60%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, white 4%, transparent) inset,
+    0 24px 48px -24px rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(16px);
+}
+
+.glass-panel-strong {
+  background: color-mix(in srgb, var(--app-surface) 85%, transparent);
+  border: 1px solid var(--app-border-bright);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, white 6%, transparent) inset,
+    0 32px 64px -32px rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(20px);
+}
+
+/* Inputs */
+.app-input {
+  width: 100%;
+  border-radius: var(--app-radius);
+  border: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-bg) 80%, transparent);
+  padding: 0.625rem 1rem;
+  color: var(--app-text);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.app-input::placeholder {
+  color: color-mix(in srgb, var(--app-muted) 70%, transparent);
+}
+
+.app-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--app-accent) 60%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 18%, transparent);
+}
+
+/* Primary button */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--app-radius);
+  background: linear-gradient(135deg, var(--app-accent) 0%, var(--app-accent-dim) 100%);
+  padding: 0.75rem 1.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--app-on-accent);
+  box-shadow: 0 4px 24px -4px var(--app-glow);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 8px 32px -4px var(--app-glow);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--app-radius);
+  border: 1px solid var(--app-border-bright);
+  background: color-mix(in srgb, var(--app-elevated) 60%, transparent);
+  padding: 0.75rem 1.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--app-text);
+  backdrop-filter: blur(8px);
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease,
+    background 0.2s ease;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--app-accent) 50%, transparent);
+  color: var(--app-accent-bright);
+  background: color-mix(in srgb, var(--app-accent) 8%, transparent);
+}
+
+/* Horizontal feature carousel */
+.feature-carousel {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding: 1rem;
+  padding-bottom: 0.5rem;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.feature-carousel::-webkit-scrollbar {
+  display: none;
+}
+
+.feature-carousel > * {
+  scroll-snap-align: start;
+  flex: 0 0 min(100%, 320px);
+}
+
+@keyframes float-orb {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(12px, -18px) scale(1.06);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+.animate-float-orb {
+  animation: float-orb 8s ease-in-out infinite;
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, var(--app-text) 0%, var(--app-accent-bright) 50%, var(--app-violet) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }

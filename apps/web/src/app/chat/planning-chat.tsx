@@ -23,6 +23,7 @@ import {
   type PlanningChatMessage,
 } from "@/lib/planning-chat-model";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { motion, AnimatePresence } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const FIRESTORE_DEBOUNCE_MS = 800;
@@ -228,17 +229,16 @@ export function PlanningChat() {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-app-bg">
       {/* Top bar — ChatGPT-style */}
-      <header className="shrink-0 border-b border-app-border bg-app-bg/90 px-4 py-3 backdrop-blur-md lg:px-6">
+      <header className="shrink-0 border-b border-app-border/80 bg-app-sidebar/40 px-4 py-4 backdrop-blur-xl lg:px-6">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
           <div>
-            <h1 className="text-sm font-semibold text-app-text">Planning assistant</h1>
-            <p className="text-xs text-app-muted">Project kickoff & task flow · Uses Gemini on the server</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-app-accent">
+              Planning
+            </p>
+            <h1 className="text-base font-semibold text-app-text">AI assistant</h1>
+            <p className="text-xs text-app-muted">Project kickoff · Powered by Gemini</p>
           </div>
-          <button
-            type="button"
-            onClick={newConversation}
-            className="rounded-lg border border-app-border bg-app-elevated px-3 py-1.5 text-xs font-medium text-app-text hover:border-app-accent/50 hover:text-app-accent"
-          >
+          <button type="button" onClick={newConversation} className="btn-secondary px-3 py-1.5 text-xs">
             New chat
           </button>
         </div>
@@ -252,16 +252,20 @@ export function PlanningChat() {
       >
         <div className="mx-auto max-w-3xl px-4 py-6 lg:px-6">
           <div className="space-y-6">
-            {messages.map((m, i) => (
-              <div
-                key={`${i}-${m.role}-${m.content.slice(0, 20)}`}
-                className={`flex gap-4 ${m.role === "user" ? "flex-row-reverse" : "flex-row"}`}
-              >
+            <AnimatePresence initial={false}>
+              {messages.map((m, i) => (
+                <motion.div
+                  key={`${i}-${m.role}-${m.content.slice(0, 20)}`}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className={`flex gap-4 ${m.role === "user" ? "flex-row-reverse" : "flex-row"}`}
+                >
                 <div
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-xs font-bold ${
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${
                     m.role === "user"
-                      ? "bg-app-accent/25 text-app-accent"
-                      : "bg-app-elevated text-app-accent ring-1 ring-app-border"
+                      ? "bg-gradient-to-br from-app-accent/30 to-app-accent-dim/20 text-app-accent-bright ring-1 ring-app-accent/30"
+                      : "glass-panel text-app-violet"
                   }`}
                   aria-hidden
                 >
@@ -275,15 +279,16 @@ export function PlanningChat() {
                   <div
                     className={`inline-block max-w-[min(100%,42rem)] rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
                       m.role === "user"
-                        ? "bg-app-elevated text-app-text ring-1 ring-app-accent/25"
-                        : "bg-transparent text-app-text"
+                        ? "glass-panel text-app-text ring-1 ring-app-accent/20"
+                        : "text-app-text"
                     }`}
                   >
                     <div className="whitespace-pre-wrap">{m.content}</div>
                   </div>
                 </div>
-              </div>
-            ))}
+              </motion.div>
+              ))}
+            </AnimatePresence>
             <div ref={bottomRef} />
           </div>
         </div>
@@ -298,7 +303,7 @@ export function PlanningChat() {
       {/* Composer */}
       <div className="shrink-0 border-t border-app-border bg-gradient-to-t from-app-bg via-app-bg to-transparent px-4 pb-6 pt-3 lg:px-6">
         <form
-          className="mx-auto flex max-w-3xl gap-2 rounded-2xl border border-app-border bg-app-elevated p-2 shadow-lg shadow-black/40 ring-1 ring-white/[0.04] focus-within:border-app-accent/40 focus-within:ring-app-accent/20"
+          className="glass-panel-strong mx-auto flex max-w-3xl gap-2 rounded-2xl p-2 focus-within:ring-app-accent/30"
           onSubmit={(e) => {
             e.preventDefault();
             void send();
@@ -330,7 +335,7 @@ export function PlanningChat() {
           <button
             type="submit"
             disabled={sending || !input.trim()}
-            className="mt-auto flex h-11 w-11 shrink-0 items-center justify-center self-end rounded-xl bg-app-accent text-app-on-accent hover:bg-app-accent-bright disabled:opacity-40"
+            className="btn-primary mt-auto flex h-11 w-11 shrink-0 items-center justify-center self-end rounded-xl !p-0 disabled:opacity-40"
             aria-label="Send"
           >
             {sending ? (
