@@ -3,40 +3,104 @@
 import { useAuth } from "@/contexts/auth-context";
 import { getFirestoreDb } from "@/lib/firebase";
 import {
+  clearJiraConnectionCache,
+  disconnectJira,
+  fetchJiraConnection,
   jiraCredentialsFromProfile,
   listJiraProjects,
+  listJiraSites,
+  resolveJiraClientAuth,
+  setJiraDefaultProject,
+  startJiraOAuth,
   testJiraConnection,
+  type JiraConnectionInfo,
   type JiraProject,
+  type JiraSite,
 } from "@/lib/jira-client";
 import { USERS_COLLECTION } from "@/lib/user-model";
 import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
-import { startTransition, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { startTransition, useCallback, useEffect, useState } from "react";
 
 export function SettingsClient() {
   const { user, profile, refreshProfile } = useAuth();
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<"profile" | "jira">("profile");
+
+  const [connection, setConnection] = useState<JiraConnectionInfo | null>(null);
+  const [sites, setSites] = useState<JiraSite[]>([]);
+  const [projects, setProjects] = useState<JiraProject[]>([]);
+  const [selectedCloudId, setSelectedCloudId] = useState("");
+  const [selectedProject, setSelectedProject] = useState("");
+  const [loadingConn, setLoadingConn] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showLegacy, setShowLegacy] = useState(false);
 
   const [domain, setDomain] = useState("");
   const [email, setEmail] = useState("");
   const [apiToken, setApiToken] = useState("");
-  const [defaultProject, setDefaultProject] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [projects, setProjects] = useState<JiraProject[]>([]);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [legacyProject, setLegacyProject] = useState("");
 
-  function credentialsFromForm() {
-    const d = domain.trim();
-    const e = email.trim();
-    const t = apiToken.trim();
-    if (!d || !e || !t) return null;
-    return {
-      domain: d,
-      email: e,
-      apiToken: t,
-      defaultProject: defaultProject.trim(),
-    };
-  }
+  const jiraAuth = user ? resolveJiraClientAuth(user, profile) : null;
+  const manualCreds = jiraCredentialsFromProfile(profile);
+
+  const loadConnection = useCallback(async () => {
+    if (!user) {
+      setConnection(null);
+      setLoadingConn(false);
+      return;
+    }
+    setLoadingConn(true);
+    try {
+      const conn = await fetchJiraConnection(() => user.getIdToken());
+      setConnection(conn);
+      setSelectedCloudId(conn.cloud_id ?? "");
+      setSelectedProject(conn.project_key ?? profile?.jiraDefaultProject ?? "");
+      if (conn.connected) {
+        const [siteList, projectList] = await Promise.all([
+          listJiraSites(() => user.getIdToken()),
+          listJiraProjects(
+            { mode: "oauth", getIdToken: () => user.getIdToken() },
+            manualCreds,
+          ),
+        ]);
+        setSites(siteList);
+        setProjects(projectList);
+      } else {
+        setSites([]);
+        setProjects([]);
+      }
+    } catch (e) {
+      setConnection({ connected: false });
+      if (manualCreds) {
+        setMessage({
+          type: "error",
+          text:
+            e instanceof Error
+              ? e.message
+              : "Could not load OAuth status; manual credentials may still work.",
+        });
+      }
+    } finally {
+      setLoadingConn(false);
+    }
+  }, [user, profile?.jiraDefaultProject, manualCreds]);
+
+  useEffect(() => {
+    const jiraParam = searchParams.get("jira");
+    if (jiraParam === "connected") {
+      setActiveTab("jira");
+      setMessage({ type: "success", text: "Jira connected successfully." });
+      clearJiraConnectionCache();
+    } else if (jiraParam === "error") {
+      setActiveTab("jira");
+      setMessage({
+        type: "error",
+        text: `Jira connection failed (${searchParams.get("reason") ?? "unknown"}).`,
+      });
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!profile) return;
@@ -44,57 +108,159 @@ export function SettingsClient() {
       setDomain(profile.jiraDomain || "");
       setEmail(profile.jiraEmail || "");
       setApiToken(profile.jiraApiToken || "");
-      setDefaultProject(profile.jiraDefaultProject || "");
+      setLegacyProject(profile.jiraDefaultProject || "");
     });
   }, [profile]);
 
-  async function handleSaveJira(e: React.FormEvent) {
-    e.preventDefault();
-    if (!user) return;
-    setSaving(true);
-    setMessage(null);
+  useEffect(() => {
+    void loadConnection();
+  }, [loadConnection]);
 
+  async function handleConnectJira() {
+    if (!user) return;
+    setBusy(true);
+    setMessage(null);
     try {
-      const userRef = doc(getFirestoreDb(), USERS_COLLECTION, user.uid);
-      await updateDoc(userRef, {
-        jiraDomain: domain.trim(),
-        jiraEmail: email.trim(),
-        jiraApiToken: apiToken.trim(),
-        jiraDefaultProject: defaultProject.trim(),
-        updatedAt: serverTimestamp(),
-      });
-      await refreshProfile();
+      const url = await startJiraOAuth(() => user.getIdToken());
+      window.location.href = url;
+    } catch (e) {
       setMessage({
-        type: "success",
-        text: "Jira settings saved. Open Tasks to import issues from your project.",
+        type: "error",
+        text: e instanceof Error ? e.message : "Could not start Jira connection.",
       });
-    } catch (error) {
-      console.error("Failed to save settings:", error);
-      setMessage({ type: "error", text: "Failed to save settings. See console for details." });
-    } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
-  async function handleTestConnection() {
-    const creds = credentialsFromForm() ?? jiraCredentialsFromProfile(profile);
-    if (!creds) {
+  async function handleDisconnect() {
+    if (!user) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await disconnectJira(() => user.getIdToken());
+      clearJiraConnectionCache();
+      await loadConnection();
+      setMessage({ type: "success", text: "Jira disconnected." });
+    } catch (e) {
       setMessage({
         type: "error",
-        text: "Enter domain, email, and API token before testing.",
+        text: e instanceof Error ? e.message : "Failed to disconnect Jira.",
       });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveDefaultProject() {
+    if (!user || !selectedProject) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const picked = projects.find((p) => p.key === selectedProject);
+      if (connection?.connected) {
+        const updated = await setJiraDefaultProject(() => user.getIdToken(), {
+          project_key: selectedProject,
+          cloud_id: selectedCloudId || connection.cloud_id || undefined,
+          project_id: picked?.id,
+          project_name: picked?.name,
+        });
+        setConnection(updated);
+      }
+      await updateDoc(doc(getFirestoreDb(), USERS_COLLECTION, user.uid), {
+        jiraDefaultProject: selectedProject,
+        updatedAt: serverTimestamp(),
+      });
+      await refreshProfile();
+      setMessage({ type: "success", text: `Default project set to ${selectedProject}.` });
+    } catch (e) {
+      setMessage({
+        type: "error",
+        text: e instanceof Error ? e.message : "Failed to save default project.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSiteChange(cloudId: string) {
+    setSelectedCloudId(cloudId);
+    if (!user || !connection?.connected) return;
+    setBusy(true);
+    try {
+      await setJiraDefaultProject(() => user.getIdToken(), {
+        project_key: selectedProject || connection.project_key || "PROJ",
+        cloud_id: cloudId,
+      });
+      clearJiraConnectionCache();
+      const projectList = await listJiraProjects(
+        { mode: "oauth", getIdToken: () => user.getIdToken() },
+        manualCreds,
+      );
+      setProjects(projectList);
+    } catch (e) {
+      setMessage({
+        type: "error",
+        text: e instanceof Error ? e.message : "Failed to switch Jira site.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveLegacy(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await updateDoc(doc(getFirestoreDb(), USERS_COLLECTION, user.uid), {
+        jiraDomain: domain.trim(),
+        jiraEmail: email.trim(),
+        jiraApiToken: apiToken.trim(),
+        jiraDefaultProject: legacyProject.trim(),
+        updatedAt: serverTimestamp(),
+      });
+      await refreshProfile();
+      setMessage({ type: "success", text: "Manual Jira settings saved." });
+    } catch (e) {
+      setMessage({
+        type: "error",
+        text: e instanceof Error ? e.message : "Failed to save settings.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleTestLegacy() {
+    if (!jiraAuth) return;
+    const creds =
+      domain && email && apiToken
+        ? {
+            domain: domain.trim(),
+            email: email.trim(),
+            apiToken: apiToken.trim(),
+            defaultProject: legacyProject.trim(),
+          }
+        : manualCreds;
+    if (!creds) {
+      setMessage({ type: "error", text: "Enter domain, email, and API token." });
       return;
     }
-    setTesting(true);
+    setBusy(true);
     setMessage(null);
-    setProjects([]);
     try {
-      const result = await testJiraConnection(creds);
+      const result = await testJiraConnection(
+        jiraAuth.mode === "oauth"
+          ? { mode: "manual", creds }
+          : jiraAuth,
+        creds,
+      );
       if (!result.ok) {
         setMessage({ type: "error", text: result.message });
         return;
       }
-      const listed = await listJiraProjects(creds);
+      const listed = await listJiraProjects({ mode: "manual", creds }, creds);
       setProjects(listed);
       setMessage({
         type: "success",
@@ -102,16 +268,17 @@ export function SettingsClient() {
           ? `Connected as ${result.user}. ${listed.length} project(s) found.`
           : result.message,
       });
-    } catch (error) {
+    } catch (e) {
       setMessage({
         type: "error",
-        text:
-          error instanceof Error ? error.message : "Connection test failed.",
+        text: e instanceof Error ? e.message : "Connection test failed.",
       });
     } finally {
-      setTesting(false);
+      setBusy(false);
     }
   }
+
+  const oauthConnected = Boolean(connection?.connected);
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -147,25 +314,21 @@ export function SettingsClient() {
       {activeTab === "profile" && (
         <div className="rounded-xl border border-app-border bg-app-elevated p-6">
           <h2 className="mb-4 text-lg font-semibold text-app-text">User Profile</h2>
-          
           <div className="space-y-4">
             <div>
               <label className="mb-1 block text-sm font-medium text-app-muted">Name</label>
               <div className="text-app-text">{profile?.displayName || "—"}</div>
             </div>
-            
             <div>
               <label className="mb-1 block text-sm font-medium text-app-muted">Email</label>
               <div className="text-app-text">{user?.email || "—"}</div>
             </div>
-
             <div>
               <label className="mb-1 block text-sm font-medium text-app-muted">Team ID</label>
-              <div className="text-app-text font-mono text-app-accent">
+              <div className="font-mono text-app-accent text-app-text">
                 {profile?.teamId || "No Team Assigned"}
               </div>
             </div>
-
             <div>
               <label className="mb-1 block text-sm font-medium text-app-muted">Role</label>
               <div className="inline-block rounded-full bg-app-accent/20 px-3 py-1 text-sm font-medium capitalize text-app-accent">
@@ -178,113 +341,190 @@ export function SettingsClient() {
 
       {activeTab === "jira" && (
         <div className="rounded-xl border border-app-border bg-app-elevated p-6">
-          <h2 className="mb-4 text-lg font-semibold text-app-text">Jira Integration</h2>
+          <h2 className="mb-2 text-lg font-semibold text-app-text">Jira Cloud</h2>
           <p className="mb-6 text-sm text-app-muted">
-            Connect your Jira Cloud account. Tasks, status changes, and deletes on
-            the board sync to Jira when credentials are saved. API tokens are sent
-            to the FastAPI proxy only (not exposed in client bundles beyond your session).
+            Connect with Atlassian in one click. Tokens stay on the server — nothing sensitive is
+            stored in the browser.
           </p>
 
-          <form onSubmit={handleSaveJira} className="space-y-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-app-text">Jira Domain</label>
-              <input
-                type="text"
-                placeholder="e.g. your-company.atlassian.net"
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-                className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text outline-none focus:border-app-accent"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium text-app-text">Jira Email</label>
-              <input
-                type="email"
-                placeholder="your-email@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text outline-none focus:border-app-accent"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium text-app-text">Jira API Token</label>
-              <input
-                type="password"
-                placeholder="ATATT3xFfGF0..."
-                value={apiToken}
-                onChange={(e) => setApiToken(e.target.value)}
-                className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text outline-none focus:border-app-accent"
-              />
-              <p className="mt-1 text-xs text-app-muted">
-                Generate an API token from your Atlassian account security settings.
+          {loadingConn ? (
+            <p className="text-sm text-app-muted">Loading connection status…</p>
+          ) : oauthConnected ? (
+            <div className="space-y-4">
+              <p className="rounded-lg border border-green-500/30 bg-green-950/20 px-3 py-2 text-sm text-green-300">
+                Connected to {connection?.site_name ?? "Jira Cloud"}
+                {connection?.site_url ? (
+                  <>
+                    {" "}
+                    (
+                    <a
+                      href={connection.site_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline"
+                    >
+                      {connection.site_url}
+                    </a>
+                    )
+                  </>
+                ) : null}
               </p>
-            </div>
 
-            <div>
-              <label className="mb-1 block text-sm font-medium text-app-text">Default Project Key</label>
-              <input
-                type="text"
-                placeholder="e.g. PROJ"
-                value={defaultProject}
-                onChange={(e) => setDefaultProject(e.target.value)}
-                className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text outline-none focus:border-app-accent"
-              />
-            </div>
+              {sites.length > 1 ? (
+                <label className="block text-sm">
+                  <span className="text-app-muted">Jira site</span>
+                  <select
+                    value={selectedCloudId}
+                    onChange={(e) => void handleSiteChange(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-app-text"
+                  >
+                    {sites.map((s) => (
+                      <option key={s.cloud_id} value={s.cloud_id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
 
-            <div className="flex flex-wrap gap-2 pt-2">
-              <button
-                type="submit"
-                disabled={saving}
-                className="rounded-lg bg-app-accent px-4 py-2 text-sm font-medium text-white hover:bg-app-accent/90 disabled:opacity-50"
-              >
-                {saving ? "Saving..." : "Save settings"}
-              </button>
+              {projects.length > 0 ? (
+                <label className="block text-sm">
+                  <span className="text-app-muted">Default project</span>
+                  <select
+                    value={selectedProject}
+                    onChange={(e) => setSelectedProject(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-app-text"
+                  >
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.key}>
+                        {p.key} — {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <p className="text-xs text-app-muted">Loading projects…</p>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={busy || !selectedProject}
+                  onClick={() => void handleSaveDefaultProject()}
+                  className="rounded-lg bg-app-accent px-4 py-2 text-sm font-medium text-white hover:bg-app-accent/90 disabled:opacity-50"
+                >
+                  Save default project
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleConnectJira()}
+                  className="rounded-lg border border-app-border px-4 py-2 text-sm font-medium text-app-text hover:border-app-accent disabled:opacity-50"
+                >
+                  Reconnect
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleDisconnect()}
+                  className="rounded-lg border border-red-500/40 px-4 py-2 text-sm font-medium text-red-300 hover:bg-red-950/30 disabled:opacity-50"
+                >
+                  Disconnect
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm text-app-muted">Not connected to Jira.</p>
               <button
                 type="button"
-                disabled={testing || saving}
-                onClick={() => void handleTestConnection()}
-                className="rounded-lg border border-app-border px-4 py-2 text-sm font-medium text-app-text hover:border-app-accent disabled:opacity-50"
+                disabled={busy || !user}
+                onClick={() => void handleConnectJira()}
+                className="rounded-lg bg-app-accent px-4 py-2 text-sm font-medium text-white hover:bg-app-accent/90 disabled:opacity-50"
               >
-                {testing ? "Testing…" : "Test connection"}
+                {busy ? "Redirecting…" : "Connect Jira"}
               </button>
+              {manualCreds ? (
+                <p className="text-xs text-app-muted">
+                  Manual API token credentials are saved and used until you connect with OAuth.
+                </p>
+              ) : null}
             </div>
+          )}
 
-            {projects.length > 0 ? (
-              <div>
-                <label className="mb-1 block text-sm font-medium text-app-text">
-                  Your projects (pick a default key above)
-                </label>
-                <ul className="max-h-40 overflow-y-auto rounded-lg border border-app-border bg-app-bg p-2 text-sm text-app-muted">
-                  {projects.map((p) => (
-                    <li key={p.id} className="py-0.5">
-                      <button
-                        type="button"
-                        className="w-full rounded px-1 py-0.5 text-left hover:bg-app-elevated hover:text-app-text"
-                        onClick={() => setDefaultProject(p.key)}
-                      >
-                        <span className="font-mono text-app-accent">{p.key}</span> — {p.name}
-                        {defaultProject === p.key ? (
-                          <span className="ml-2 text-xs text-app-accent">(selected)</span>
-                        ) : null}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+          <button
+            type="button"
+            className="mt-6 text-xs text-app-muted underline hover:text-app-accent"
+            onClick={() => setShowLegacy((v) => !v)}
+          >
+            {showLegacy ? "Hide" : "Show"} manual API token setup (legacy)
+          </button>
 
-            {message && (
-              <p
-                className={`text-sm ${
-                  message.type === "success" ? "text-green-500" : "text-red-500"
-                }`}
-              >
-                {message.text}
+          {showLegacy ? (
+            <form
+              onSubmit={(e) => void handleSaveLegacy(e)}
+              className="mt-4 space-y-3 border-t border-app-border pt-4"
+            >
+              <p className="text-xs text-app-muted">
+                Legacy mode: domain, email, and API token are stored in your Firestore profile.
               </p>
-            )}
-          </form>
+              <input
+                type="text"
+                placeholder="your-company.atlassian.net"
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text"
+              />
+              <input
+                type="email"
+                placeholder="email@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text"
+              />
+              <input
+                type="password"
+                placeholder="API token"
+                value={apiToken}
+                onChange={(e) => setApiToken(e.target.value)}
+                className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text"
+              />
+              <input
+                type="text"
+                placeholder="Default project key"
+                value={legacyProject}
+                onChange={(e) => setLegacyProject(e.target.value)}
+                className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="rounded-lg border border-app-border px-4 py-2 text-sm text-app-text"
+                >
+                  Save manual settings
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleTestLegacy()}
+                  className="rounded-lg border border-app-border px-4 py-2 text-sm text-app-text"
+                >
+                  Test manual connection
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {message ? (
+            <p
+              className={`mt-4 text-sm ${
+                message.type === "success" ? "text-green-500" : "text-red-500"
+              }`}
+            >
+              {message.text}
+            </p>
+          ) : null}
         </div>
       )}
     </div>

@@ -7,7 +7,7 @@ import { useState } from "react";
 const inputClass = "app-input";
 
 export function AuthForm() {
-  const { signInEmail, signUpEmail } = useAuth();
+  const { signInEmail, signInGoogle, signUpEmail } = useAuth();
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -16,6 +16,18 @@ export function AuthForm() {
   const [isTeamLead, setIsTeamLead] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function handleGoogle() {
+    setBusy(true);
+    setError(null);
+    try {
+      await signInGoogle();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -133,6 +145,28 @@ export function AuthForm() {
           {busy ? "Please wait…" : authMode === "signin" ? "Sign in" : "Create account"}
         </button>
       </form>
+
+      {authMode === "signin" ? (
+        <>
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center" aria-hidden>
+              <div className="w-full border-t border-app-border" />
+            </div>
+            <p className="relative flex justify-center text-xs uppercase tracking-wide text-app-muted">
+              <span className="px-2">or</span>
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void handleGoogle()}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-app-border bg-app-bg px-4 py-3 text-sm font-medium text-app-text hover:border-app-accent disabled:opacity-50"
+          >
+            <span aria-hidden>G</span>
+            Continue with Google
+          </button>
+        </>
+      ) : null}
     </GlassCard>
   );
 }

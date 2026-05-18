@@ -1,6 +1,7 @@
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { RequireAuth } from "@/components/require-auth";
 import { PageHeader } from "@/components/ui/page-header";
+import { Suspense } from "react";
 import { SettingsClient } from "./settings-client";
 
 export default function SettingsPage() {
@@ -14,7 +15,9 @@ export default function SettingsPage() {
               title="Preferences"
               description="Manage your profile and connect Jira Cloud for task sync."
             />
-            <SettingsClient />
+            <Suspense fallback={<p className="text-sm text-app-muted">Loading settings…</p>}>
+              <SettingsClient />
+            </Suspense>
           </div>
         </div>
       </DashboardLayout>

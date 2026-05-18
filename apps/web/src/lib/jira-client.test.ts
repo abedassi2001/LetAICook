@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   jiraCredentialsFromProfile,
   jiraHeaders,
+  resolveJiraClientAuth,
 } from "./jira-client";
 import type { UserProfileDoc } from "./user-model";
 
@@ -28,6 +29,25 @@ describe("jiraCredentialsFromProfile", () => {
       apiToken: "secret",
       defaultProject: "PROJ",
     });
+  });
+});
+
+describe("resolveJiraClientAuth", () => {
+  it("prefers oauth when user is signed in", () => {
+    const auth = resolveJiraClientAuth(
+      { getIdToken: async () => "tok" } as never,
+      null,
+    );
+    expect(auth?.mode).toBe("oauth");
+  });
+
+  it("falls back to manual without user", () => {
+    const auth = resolveJiraClientAuth(null, {
+      jiraDomain: "acme.atlassian.net",
+      jiraEmail: "a@b.com",
+      jiraApiToken: "secret",
+    } as never);
+    expect(auth?.mode).toBe("manual");
   });
 });
 
