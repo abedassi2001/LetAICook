@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 import time
@@ -15,19 +16,34 @@ import requests
 
 from letaicook_api.services.jira_oauth_store import JiraOAuthRecord, load_record, save_record
 
+logger = logging.getLogger(__name__)
+
 ATLASSIAN_AUTH_URL = "https://auth.atlassian.com/authorize"
 ATLASSIAN_TOKEN_URL = "https://auth.atlassian.com/oauth/token"
 ATLASSIAN_RESOURCES_URL = "https://api.atlassian.com/oauth/token/accessible-resources"
 
-DEFAULT_SCOPES = (
-    "read:jira-work write:jira-work read:jira-user offline_access"
-)
+ATLASSIAN_SCOPES = [
+    "read:jira-work",
+    "write:jira-work",
+    "read:jira-user",
+    "offline_access",
+]
+
+# Space-separated scopes for the authorize URL (Atlassian 3LO).
+ATLASSIAN_SCOPE_PARAM = " ".join(ATLASSIAN_SCOPES)
+
+_PLACEHOLDER_CLIENT_IDS = frozenset({"your_client_id", "your-client-id"})
 
 
 def _client_id() -> str:
-    value = os.getenv("ATLASSIAN_CLIENT_ID", "").strip()
+    value = os.getenv("ATLASSIAN_CLIENT_ID", "").strip().strip('"').strip("'")
     if not value:
         raise ValueError("ATLASSIAN_CLIENT_ID is not set.")
+    if value.lower() in _PLACEHOLDER_CLIENT_IDS:
+        raise ValueError(
+            "ATLASSIAN_CLIENT_ID is a placeholder; set the OAuth 2.0 (3LO) Client ID from "
+            "Atlassian Developer Console → your app → Settings, then restart the API."
+        )
     return value
 
 
@@ -82,16 +98,26 @@ def verify_oauth_state(state: str, max_age_seconds: int = 600) -> str:
 
 
 def build_authorize_url(uid: str) -> str:
+    client_id = _client_id()
+    redirect = redirect_uri()
     params = {
         "audience": "api.atlassian.com",
-        "client_id": _client_id(),
-        "scope": DEFAULT_SCOPES,
-        "redirect_uri": redirect_uri(),
+        "client_id": client_id,
+        "scope": ATLASSIAN_SCOPE_PARAM,
+        "redirect_uri": redirect,
         "state": make_oauth_state(uid),
         "response_type": "code",
         "prompt": "consent",
     }
-    return f"{ATLASSIAN_AUTH_URL}?{urlencode(params)}"
+    url = f"{ATLASSIAN_AUTH_URL}?{urlencode(params)}"
+    # Temporary debug: never log secrets or full client_id.
+    logger.warning(
+        "Atlassian OAuth authorize URL built (client_id_prefix=%s, redirect_uri=%s, url=%s)",
+        client_id[:6],
+        redirect,
+        url,
+    )
+    return url
 
 
 def exchange_code_for_tokens(code: str) -> dict[str, Any]:
