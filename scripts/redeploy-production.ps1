@@ -39,12 +39,15 @@ Write-Host "Restoring public API access (ingress=all) ..."
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "Preparing web production env and deploying Hosting ..."
-& (Join-Path $RepoRoot "scripts\prepare-hosting-deploy.ps1") -ProjectId $ProjectId -Region $Region
+Write-Host "Setting API CORS for web.app + local dev ..."
+& $Gcloud run services update letaicook-api `
+    --project $ProjectId `
+    --region $Region `
+    --set-env-vars "CORS_ORIGINS=https://letaicook.web.app\,https://letaicook.firebaseapp.com\,http://localhost:3000"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-& (Join-Path $RepoRoot "scripts\deploy-hosting.ps1") -ProjectId $ProjectId -SkipPrepare
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
+$ApiUrl = & $Gcloud run services describe letaicook-api --project $ProjectId --region $Region --format="value(status.url)"
 Write-Host ""
-Write-Host "Production is live again at https://${ProjectId}.web.app"
+Write-Host "API redeployed: $ApiUrl"
+Write-Host "Web app URL (if using Firebase Hosting): https://${ProjectId}.web.app"
+Write-Host "Optional: .\scripts\deploy-web-cloudrun.ps1  OR  .\scripts\deploy-hosting.ps1  to publish frontend changes."

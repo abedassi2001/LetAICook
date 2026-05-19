@@ -21,7 +21,7 @@ import { jiraCallbackErrorMessage } from "@/lib/jira-errors";
 import { USERS_COLLECTION } from "@/lib/user-model";
 import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { useSearchParams } from "next/navigation";
-import { startTransition, useCallback, useEffect, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 
 export function SettingsClient() {
   const { user, profile, refreshProfile } = useAuth();
@@ -43,8 +43,19 @@ export function SettingsClient() {
   const [apiToken, setApiToken] = useState("");
   const [legacyProject, setLegacyProject] = useState("");
 
-  const jiraAuth = user ? resolveJiraClientAuth(user, profile) : null;
-  const manualCreds = jiraCredentialsFromProfile(profile);
+  const jiraDomain = profile?.jiraDomain?.trim() ?? "";
+  const jiraEmail = profile?.jiraEmail?.trim() ?? "";
+  const jiraApiToken = profile?.jiraApiToken?.trim() ?? "";
+  const jiraDefaultProject = profile?.jiraDefaultProject?.trim() ?? "";
+
+  const jiraAuth = useMemo(
+    () => (user ? resolveJiraClientAuth(user, profile) : null),
+    [user, profile],
+  );
+  const manualCreds = useMemo(
+    () => jiraCredentialsFromProfile(profile),
+    [jiraDomain, jiraEmail, jiraApiToken, jiraDefaultProject],
+  );
 
   const loadConnection = useCallback(async () => {
     if (!user) {
@@ -57,7 +68,7 @@ export function SettingsClient() {
       const conn = await fetchJiraConnection(() => user.getIdToken());
       setConnection(conn);
       setSelectedCloudId(conn.cloud_id ?? "");
-      setSelectedProject(conn.project_key ?? profile?.jiraDefaultProject ?? "");
+      setSelectedProject(conn.project_key ?? jiraDefaultProject);
       if (conn.connected) {
         const [siteList, projectList] = await Promise.all([
           listJiraSites(() => user.getIdToken()),
@@ -84,21 +95,23 @@ export function SettingsClient() {
     } finally {
       setLoadingConn(false);
     }
-  }, [user, profile?.jiraDefaultProject, manualCreds]);
+  }, [user, jiraDefaultProject, manualCreds]);
 
   useEffect(() => {
     const jiraParam = searchParams.get("jira");
-    if (jiraParam === "connected") {
+    if (jiraParam !== "connected" && jiraParam !== "error") return;
+    queueMicrotask(() => {
       setActiveTab("jira");
-      setMessage({ type: "success", text: "Jira connected successfully." });
-      clearJiraConnectionCache();
-    } else if (jiraParam === "error") {
-      setActiveTab("jira");
-      setMessage({
-        type: "error",
-        text: jiraCallbackErrorMessage(searchParams.get("reason")),
-      });
-    }
+      if (jiraParam === "connected") {
+        setMessage({ type: "success", text: "Jira connected successfully." });
+        clearJiraConnectionCache();
+      } else {
+        setMessage({
+          type: "error",
+          text: jiraCallbackErrorMessage(searchParams.get("reason")),
+        });
+      }
+    });
   }, [searchParams]);
 
   useEffect(() => {
@@ -112,7 +125,9 @@ export function SettingsClient() {
   }, [profile]);
 
   useEffect(() => {
-    void loadConnection();
+    queueMicrotask(() => {
+      void loadConnection();
+    });
   }, [loadConnection]);
 
   async function handleConnectJira() {
