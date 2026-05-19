@@ -6,3 +6,10 @@
 
 GOOGLE_API_KEY: "YOUR_GEMINI_API_KEY"
 CORS_ORIGINS: "https://letaicook.web.app,https://letaicook.firebaseapp.com,http://localhost:3000"
+FIREBASE_PROJECT_ID: "letaicook"
+
+# Jira OAuth 2.0 (3LO) — server/admin only; end users never configure these.
+ATLASSIAN_CLIENT_ID: "YOUR_ATLASSIAN_OAUTH_CLIENT_ID"
+ATLASSIAN_CLIENT_SECRET: "YOUR_ATLASSIAN_OAUTH_CLIENT_SECRET"
+ATLASSIAN_REDIRECT_URI: "https://YOUR-CLOUD-RUN-URL/jira/oauth/callback"
+FRONTEND_BASE_URL: "https://letaicook.web.app"

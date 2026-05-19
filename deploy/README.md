@@ -69,6 +69,24 @@ copy deploy\cloudrun-env.sample.yaml deploy\cloudrun-env.yaml
 
 Note the **API URL** printed at the end (e.g. `https://letaicook-api-xxxxx-uc.a.run.app`).
 
+#### Jira Cloud OAuth (one shared app for all users)
+
+End users only click **Connect Jira** in Settings. They never enter `ATLASSIAN_CLIENT_ID`, client secrets, or API tokens.
+
+**Deployment owner** (API service only — Cloud Run env or `apps/api/.env.local` for local dev):
+
+| Variable | Example | Purpose |
+|----------|---------|---------|
+| `ATLASSIAN_CLIENT_ID` | From [Atlassian Developer Console](https://developer.atlassian.com/console/myapps/) | OAuth 2.0 (3LO) client id |
+| `ATLASSIAN_CLIENT_SECRET` | Same app | Server-only; never in the web app |
+| `ATLASSIAN_REDIRECT_URI` | `https://YOUR-API-URL/jira/oauth/callback` | Must match Console callback **exactly** |
+| `FRONTEND_BASE_URL` | `https://letaicook.web.app` | Where users return after OAuth |
+| `FIREBASE_PROJECT_ID` | `letaicook` | Verify Firebase ID tokens on API |
+
+**Atlassian Console:** Authorization → OAuth 2.0 (3LO) → callback URL above; scopes `read:jira-work`, `write:jira-work`, `read:jira-user`, `offline_access`. For users outside your org, enable **distribution** (test users in dev; publish/allowlist in production).
+
+Refresh tokens stay **server-side only** (see `JIRA_OAUTH_DATA_DIR` in `apps/api/api.env.sample`).
+
 ### Step B — Configure web env for production
 
 Copy [`apps/web/production.env.sample`](../apps/web/production.env.sample) → `apps/web/.env.production.local` (gitignored) **or** set in Firebase Hosting build config:
