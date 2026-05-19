@@ -22,7 +22,7 @@ const nav = [
     sub: "Architecture",
     Icon: IconDesigner,
   },
-  { href: "/tasks", label: "Tasks", sub: "Board", Icon: IconTasks },
+  { href: "/projects", label: "Projects", sub: "Jira & tasks", Icon: IconTasks },
   { href: "/settings", label: "Settings", sub: "Jira & profile", Icon: IconSettings },
 ] as const;
 
@@ -32,7 +32,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [mobileNav, setMobileNav] = useState(false);
 
   return (
-    <div className="flex min-h-screen bg-app-bg text-app-text">
+    <div className="flex h-screen overflow-hidden bg-app-bg text-app-text">
       <header className="fixed left-0 right-0 top-0 z-40 flex h-14 items-center justify-between border-b border-app-border/80 bg-app-sidebar/90 px-4 backdrop-blur-xl lg:hidden">
         <button
           type="button"
@@ -67,11 +67,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       </AnimatePresence>
 
       <aside
-        className={`fixed bottom-0 left-0 top-0 z-40 flex w-[min(100%,280px)] flex-col border-r border-app-border/80 bg-app-sidebar/95 pt-14 backdrop-blur-xl transition-transform duration-300 ease-out lg:static lg:w-64 lg:translate-x-0 lg:pt-0 ${
+        className={`fixed bottom-0 left-0 top-0 z-40 flex h-full max-h-screen w-[min(100%,280px)] flex-col overflow-hidden border-r border-app-border/80 bg-app-sidebar/95 pt-14 backdrop-blur-xl transition-transform duration-300 ease-out lg:static lg:h-screen lg:w-64 lg:translate-x-0 lg:pt-0 ${
           mobileNav ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        <div className="hidden border-b border-app-border/60 px-5 py-6 lg:block">
+        <div className="hidden shrink-0 border-b border-app-border/60 px-5 py-6 lg:block">
           <Link href="/chat" className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-app-accent/30 to-app-violet/20 ring-1 ring-white/10">
               <IconSparkle className="h-4 w-4 text-app-accent-bright" />
@@ -83,7 +83,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 p-3">
+        <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
           {nav.map(({ href, label, sub, Icon }) => {
             const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
@@ -123,7 +123,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
         </nav>
 
-        <div className="border-t border-app-border/60 p-3">
+        <div className="shrink-0 border-t border-app-border/60 p-3">
           {profile ? (
             <div className="glass-panel rounded-xl px-3 py-3">
               <p className="truncate text-sm font-medium text-app-text">{profile.displayName}</p>
@@ -151,7 +151,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="flex min-h-screen min-w-0 flex-1 flex-col pt-14 lg:pt-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pt-14 lg:pt-0">
         <AmbientBackground className="flex min-h-0 flex-1 flex-col">
           <main className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</main>
         </AmbientBackground>
