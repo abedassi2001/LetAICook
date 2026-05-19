@@ -34,6 +34,102 @@ ATLASSIAN_SCOPE_PARAM = " ".join(ATLASSIAN_SCOPES)
 
 _PLACEHOLDER_CLIENT_IDS = frozenset({"your_client_id", "your-client-id"})
 
+# Error codes for API/frontend (no secrets in payloads).
+CODE_NOT_CONFIGURED = "jira_oauth_not_configured"
+CODE_MISCONFIGURED = "jira_oauth_misconfigured"
+CODE_NO_SITES = "jira_no_sites"
+
+USER_MESSAGES: dict[str, str] = {
+    CODE_NOT_CONFIGURED: (
+        "Jira integration is not configured by this deployment. "
+        "Please ask your administrator to enable it."
+    ),
+    CODE_MISCONFIGURED: (
+        "Jira integration is not configured by this deployment. "
+        "Please ask your administrator to complete the server setup."
+    ),
+    CODE_NO_SITES: (
+        "Your Atlassian account does not have access to any Jira Cloud site. "
+        "Create a Jira site or ask an admin to invite you, then try again."
+    ),
+}
+
+ADMIN_MESSAGES: dict[str, str] = {
+    CODE_NOT_CONFIGURED: (
+        "Set ATLASSIAN_CLIENT_ID, ATLASSIAN_CLIENT_SECRET, ATLASSIAN_REDIRECT_URI, and "
+        "FRONTEND_BASE_URL on the API service (see deploy/README.md)."
+    ),
+    CODE_MISCONFIGURED: (
+        "Replace placeholder Atlassian OAuth values in API env with credentials from "
+        "Atlassian Developer Console → OAuth 2.0 (3LO)."
+    ),
+    CODE_NO_SITES: "accessible-resources returned no Jira Cloud sites for this Atlassian account.",
+}
+
+
+def map_atlassian_authorize_error(
+    error: str | None,
+    error_description: str | None = None,
+) -> str:
+    """Map Atlassian authorize-step error to a settings callback reason code."""
+    combined = f"{error or ''} {error_description or ''}".lower()
+    if "jira site" in combined or (
+        "jira" in combined and ("don't have" in combined or "do not have" in combined)
+    ):
+        return CODE_NO_SITES
+    normalized = (error or "").lower().strip()
+    if normalized in ("access_denied", "user_denied", "consent_denied"):
+        return "jira_oauth_denied"
+    return "jira_oauth_failed"
+
+
+
+class JiraOAuthSetupError(Exception):
+    """SaaS OAuth cannot proceed; safe to expose code and user_message to clients."""
+
+    def __init__(self, code: str, *, admin_detail: str | None = None) -> None:
+        self.code = code
+        self.user_message = USER_MESSAGES.get(code, USER_MESSAGES[CODE_NOT_CONFIGURED])
+        self.admin_message = admin_detail or ADMIN_MESSAGES.get(
+            code, ADMIN_MESSAGES[CODE_NOT_CONFIGURED]
+        )
+        super().__init__(self.user_message)
+
+
+def oauth_configured() -> bool:
+    """True when server-side Atlassian OAuth env is present."""
+    return oauth_config_error() is None
+
+
+def oauth_config_error() -> JiraOAuthSetupError | None:
+    """Return setup error if OAuth is not ready, else None."""
+    try:
+        _client_id()
+    except ValueError as exc:
+        msg = str(exc)
+        if "placeholder" in msg.lower():
+            return JiraOAuthSetupError(CODE_MISCONFIGURED, admin_detail=msg)
+        return JiraOAuthSetupError(CODE_NOT_CONFIGURED, admin_detail=msg)
+    try:
+        _client_secret()
+    except ValueError as exc:
+        return JiraOAuthSetupError(CODE_NOT_CONFIGURED, admin_detail=str(exc))
+    try:
+        redirect_uri()
+    except ValueError as exc:
+        return JiraOAuthSetupError(CODE_NOT_CONFIGURED, admin_detail=str(exc))
+    try:
+        _state_secret()
+    except ValueError as exc:
+        return JiraOAuthSetupError(CODE_NOT_CONFIGURED, admin_detail=str(exc))
+    return None
+
+
+def assert_oauth_configured() -> None:
+    err = oauth_config_error()
+    if err:
+        raise err
+
 
 def _client_id() -> str:
     value = os.getenv("ATLASSIAN_CLIENT_ID", "").strip().strip('"').strip("'")
@@ -98,6 +194,7 @@ def verify_oauth_state(state: str, max_age_seconds: int = 600) -> str:
 
 
 def build_authorize_url(uid: str) -> str:
+    assert_oauth_configured()
     client_id = _client_id()
     redirect = redirect_uri()
     params = {
@@ -110,12 +207,10 @@ def build_authorize_url(uid: str) -> str:
         "prompt": "consent",
     }
     url = f"{ATLASSIAN_AUTH_URL}?{urlencode(params)}"
-    # Temporary debug: never log secrets or full client_id.
-    logger.warning(
-        "Atlassian OAuth authorize URL built (client_id_prefix=%s, redirect_uri=%s, url=%s)",
+    logger.info(
+        "Atlassian OAuth authorize URL built (client_id_prefix=%s, redirect_uri=%s)",
         client_id[:6],
         redirect,
-        url,
     )
     return url
 
@@ -200,8 +295,11 @@ def apply_tokens_to_record(
 
     resources = fetch_accessible_resources(record.access_token)
     if not resources:
+        record.access_token = ""
+        record.refresh_token = ""
+        record.connected = False
         save_record(record)
-        return record
+        raise JiraOAuthSetupError(CODE_NO_SITES)
 
     chosen = None
     if pick_cloud_id:

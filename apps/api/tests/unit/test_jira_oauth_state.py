@@ -29,8 +29,9 @@ def test_oauth_state_rejects_tamper():
 
 def test_build_authorize_url_rejects_placeholder_client_id(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ATLASSIAN_CLIENT_ID", "your_client_id")
-    with pytest.raises(ValueError, match="placeholder"):
+    with pytest.raises(jira_oauth.JiraOAuthSetupError) as exc_info:
         jira_oauth.build_authorize_url("firebase-uid-test")
+    assert exc_info.value.code == jira_oauth.CODE_MISCONFIGURED
 
 
 def test_build_authorize_url_includes_required_scopes(monkeypatch: pytest.MonkeyPatch):

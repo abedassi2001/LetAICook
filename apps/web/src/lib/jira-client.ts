@@ -1,4 +1,5 @@
 import { getPublicApiBaseUrl } from "@/lib/api-base";
+import { parseJiraApiError } from "@/lib/jira-errors";
 import type { TaskPriority, TaskStatus } from "@/lib/task-model";
 import type { UserProfileDoc } from "@/lib/user-model";
 import type { User } from "firebase/auth";
@@ -25,6 +26,9 @@ export type JiraConnectionInfo = {
   project_key?: string | null;
   project_name?: string | null;
   auth_mode?: string | null;
+  oauth_available?: boolean;
+  user_message?: string | null;
+  error_code?: string | null;
 };
 
 export type JiraSite = {
@@ -133,14 +137,7 @@ export async function fetchJiraConnection(
   });
   const raw = await res.text();
   if (!res.ok) {
-    let detail = raw;
-    try {
-      const j = JSON.parse(raw) as { detail?: string };
-      if (j.detail) detail = j.detail;
-    } catch {
-      /* use raw */
-    }
-    throw new Error(detail);
+    throw new Error(parseJiraApiError(raw, res.status));
   }
   const data = JSON.parse(raw) as JiraConnectionInfo;
   cachedConnection = { at: now, key: cacheKey, value: data };
@@ -195,14 +192,7 @@ async function jiraRequest<T>(
   });
   const raw = await res.text();
   if (!res.ok) {
-    let detail = raw;
-    try {
-      const j = JSON.parse(raw) as { detail?: string };
-      if (j.detail) detail = j.detail;
-    } catch {
-      /* use raw */
-    }
-    throw new Error(detail);
+    throw new Error(parseJiraApiError(raw, res.status));
   }
   if (!raw) return {} as T;
   return JSON.parse(raw) as T;
@@ -214,14 +204,7 @@ export async function startJiraOAuth(getIdToken: () => Promise<string>): Promise
   });
   const raw = await res.text();
   if (!res.ok) {
-    let detail = raw;
-    try {
-      const j = JSON.parse(raw) as { detail?: string };
-      if (j.detail) detail = j.detail;
-    } catch {
-      /* use raw */
-    }
-    throw new Error(detail);
+    throw new Error(parseJiraApiError(raw, res.status));
   }
   const data = JSON.parse(raw) as { authorize_url: string };
   return data.authorize_url;

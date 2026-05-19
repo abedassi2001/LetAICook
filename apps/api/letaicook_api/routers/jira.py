@@ -164,6 +164,9 @@ class JiraConnectionPublic(BaseModel):
     project_key: str | None = None
     project_name: str | None = None
     auth_mode: str | None = None
+    oauth_available: bool = True
+    user_message: str | None = None
+    error_code: str | None = None
 
 
 class JiraSite(BaseModel):
@@ -357,7 +360,27 @@ def _perform_transition(
     )
 
 
+def _oauth_error_response(exc: jira_oauth.JiraOAuthSetupError) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "message": exc.user_message,
+            "code": exc.code,
+            "admin_message": exc.admin_message,
+        },
+    )
+
+
 def _public_connection(uid: str) -> JiraConnectionPublic:
+    setup_err = jira_oauth.oauth_config_error()
+    if setup_err:
+        return JiraConnectionPublic(
+            connected=False,
+            auth_mode=None,
+            oauth_available=False,
+            user_message=setup_err.user_message,
+            error_code=setup_err.code,
+        )
     record = load_record(uid)
     if record and record.connected:
         return JiraConnectionPublic(
@@ -370,8 +393,9 @@ def _public_connection(uid: str) -> JiraConnectionPublic:
             project_key=record.project_key,
             project_name=record.project_name,
             auth_mode="oauth",
+            oauth_available=True,
         )
-    return JiraConnectionPublic(connected=False, auth_mode=None)
+    return JiraConnectionPublic(connected=False, auth_mode=None, oauth_available=True)
 
 
 # ---------------------------------------------------------------------------
@@ -383,29 +407,37 @@ def jira_oauth_start(uid: str = Depends(verify_firebase_bearer)) -> OAuthStartRe
     """Return Atlassian authorize URL for the signed-in Firebase user."""
     try:
         url = jira_oauth.build_authorize_url(uid)
-    except ValueError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except jira_oauth.JiraOAuthSetupError as exc:
+        raise _oauth_error_response(exc) from exc
     return OAuthStartResponse(authorize_url=url)
 
 
 @router.get("/oauth/callback")
-def jira_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None):
+def jira_oauth_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+):
     """Exchange authorization code and redirect back to the web app."""
     base = jira_oauth.frontend_base_url()
     if error:
-        return RedirectResponse(f"{base}/settings?jira=error&reason={error}")
+        reason = jira_oauth.map_atlassian_authorize_error(error, error_description)
+        return RedirectResponse(f"{base}/settings?jira=error&reason={reason}")
     if not code or not state:
         return RedirectResponse(f"{base}/settings?jira=error&reason=missing_params")
     try:
         uid = jira_oauth.verify_oauth_state(state)
         tokens = jira_oauth.exchange_code_for_tokens(code)
-    except (ValueError, RuntimeError) as exc:
-        return RedirectResponse(f"{base}/settings?jira=error&reason=oauth_failed")
+    except (ValueError, RuntimeError):
+        return RedirectResponse(f"{base}/settings?jira=error&reason=jira_oauth_failed")
     record = load_record(uid) or JiraOAuthRecord(uid=uid)
     try:
         jira_oauth.apply_tokens_to_record(record, tokens)
+    except jira_oauth.JiraOAuthSetupError as exc:
+        return RedirectResponse(f"{base}/settings?jira=error&reason={exc.code}")
     except RuntimeError:
-        return RedirectResponse(f"{base}/settings?jira=error&reason=resources_failed")
+        return RedirectResponse(f"{base}/settings?jira=error&reason=jira_oauth_failed")
     return RedirectResponse(f"{base}/settings?jira=connected")
 
 

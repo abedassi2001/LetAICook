@@ -17,6 +17,7 @@ import {
   type JiraProject,
   type JiraSite,
 } from "@/lib/jira-client";
+import { jiraCallbackErrorMessage } from "@/lib/jira-errors";
 import { USERS_COLLECTION } from "@/lib/user-model";
 import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { useSearchParams } from "next/navigation";
@@ -83,16 +84,14 @@ export function SettingsClient() {
         setProjects([]);
       }
     } catch (e) {
-      setConnection({ connected: false });
-      if (manualCreds) {
-        setMessage({
-          type: "error",
-          text:
-            e instanceof Error
-              ? e.message
-              : "Could not load OAuth status; manual credentials may still work.",
-        });
-      }
+      setConnection({ connected: false, oauth_available: false });
+      setMessage({
+        type: "error",
+        text:
+          e instanceof Error
+            ? e.message
+            : "Could not load Jira connection status.",
+      });
     } finally {
       setLoadingConn(false);
     }
@@ -109,7 +108,7 @@ export function SettingsClient() {
       } else {
         setMessage({
           type: "error",
-          text: `Jira connection failed (${searchParams.get("reason") ?? "unknown"}).`,
+          text: jiraCallbackErrorMessage(searchParams.get("reason")),
         });
       }
     });
@@ -294,6 +293,8 @@ export function SettingsClient() {
   }
 
   const oauthConnected = Boolean(connection?.connected);
+  const oauthAvailable = connection?.oauth_available !== false;
+  const setupMessage = connection?.user_message ?? null;
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -358,9 +359,15 @@ export function SettingsClient() {
         <div className="rounded-xl border border-app-border bg-app-elevated p-6">
           <h2 className="mb-2 text-lg font-semibold text-app-text">Jira Cloud</h2>
           <p className="mb-6 text-sm text-app-muted">
-            Connect with Atlassian in one click. Tokens stay on the server — nothing sensitive is
-            stored in the browser.
+            Click Connect Jira to sign in with Atlassian. You do not need an API token or developer
+            setup — your deployment administrator configures that once for everyone.
           </p>
+
+          {!loadingConn && !oauthAvailable && setupMessage ? (
+            <p className="mb-4 rounded-lg border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-sm text-amber-100">
+              {setupMessage}
+            </p>
+          ) : null}
 
           {loadingConn ? (
             <p className="text-sm text-app-muted">Loading connection status…</p>
@@ -453,7 +460,7 @@ export function SettingsClient() {
               <p className="text-sm text-app-muted">Not connected to Jira.</p>
               <button
                 type="button"
-                disabled={busy || !user}
+                disabled={busy || !user || !oauthAvailable}
                 onClick={() => void handleConnectJira()}
                 className="rounded-lg bg-app-accent px-4 py-2 text-sm font-medium text-white hover:bg-app-accent/90 disabled:opacity-50"
               >

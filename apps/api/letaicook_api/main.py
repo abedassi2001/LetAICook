@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from letaicook_api.routers import chat, design, health, jira
+from letaicook_api.services import jira_oauth
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -30,6 +34,12 @@ def create_app() -> FastAPI:
     application.include_router(chat.router)
     application.include_router(design.router)
     application.include_router(jira.router)
+
+    err = jira_oauth.oauth_config_error()
+    if err:
+        logger.warning("Jira OAuth not configured: %s", err.admin_message or err.user_message)
+    else:
+        logger.info("Jira OAuth configured (shared Atlassian app for all users).")
 
     return application
 
