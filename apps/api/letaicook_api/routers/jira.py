@@ -5,16 +5,22 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import requests
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
-from requests.auth import HTTPBasicAuth
+
+from letaicook_api.deps.auth import verify_firebase_bearer
+from letaicook_api.services import jira_oauth
+from letaicook_api.services.jira_oauth_store import (
+    JiraOAuthRecord,
+    delete_record,
+    load_record,
+    save_record,
+)
+from letaicook_api.services.jira_session import JiraSession, resolve_jira_session
 
 router = APIRouter(prefix="/jira", tags=["jira"])
 
-# ---------------------------------------------------------------------------
-# Configuration helpers
-# ---------------------------------------------------------------------------
 
 def _jira_domain() -> str | None:
     return os.getenv("JIRA_DOMAIN")
@@ -30,37 +36,6 @@ def _jira_api_token() -> str | None:
 
 def _jira_default_project() -> str | None:
     return os.getenv("JIRA_DEFAULT_PROJECT_KEY")
-
-
-def get_jira_config(
-    x_jira_domain: str | None = Header(None, alias="X-Jira-Domain"),
-    x_jira_email: str | None = Header(None, alias="X-Jira-Email"),
-    x_jira_api_token: str | None = Header(None, alias="X-Jira-Token"),
-    x_jira_project: str | None = Header(None, alias="X-Jira-Project"),
-) -> tuple[str, HTTPBasicAuth, str | None]:
-    """Return (base_url, auth, project) from headers or env, or raise 503 if not configured."""
-    domain = x_jira_domain or _jira_domain()
-    email = x_jira_email or _jira_email()
-    token = x_jira_api_token or _jira_api_token()
-    project = x_jira_project or _jira_default_project()
-    
-    if not domain or not email or not token:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Jira is not configured. Provide X-Jira-Domain, X-Jira-Email, and "
-                "X-Jira-Token headers or set server environment variables."
-            ),
-        )
-    base_url = f"https://{domain}" if not domain.startswith("http") else domain
-    auth = HTTPBasicAuth(email, token)
-    return base_url, auth, project
-
-
-_HEADERS = {
-    "Accept": "application/json",
-    "Content-Type": "application/json",
-}
 
 # ---------------------------------------------------------------------------
 # Request / Response models
@@ -179,6 +154,35 @@ class JiraIssueListItem(BaseModel):
     url: str
 
 
+class JiraConnectionPublic(BaseModel):
+    connected: bool
+    atlassian_account_id: str | None = None
+    cloud_id: str | None = None
+    site_name: str | None = None
+    site_url: str | None = None
+    project_id: str | None = None
+    project_key: str | None = None
+    project_name: str | None = None
+    auth_mode: str | None = None
+
+
+class JiraSite(BaseModel):
+    cloud_id: str
+    name: str
+    url: str
+
+
+class DefaultProjectRequest(BaseModel):
+    cloud_id: str | None = None
+    project_key: str = Field(..., min_length=1, max_length=32)
+    project_id: str | None = None
+    project_name: str | None = None
+
+
+class OAuthStartResponse(BaseModel):
+    authorize_url: str
+
+
 # ---------------------------------------------------------------------------
 # Mapping helpers
 # ---------------------------------------------------------------------------
@@ -235,8 +239,7 @@ def _parse_search_issues_payload(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _search_jira_issues(
-    base_url: str,
-    auth: HTTPBasicAuth,
+    session: JiraSession,
     jql: str,
     max_results: int,
 ) -> list[dict[str, Any]]:
@@ -244,46 +247,36 @@ def _search_jira_issues(
     limit = min(max(max_results, 1), 100)
     fields_csv = "summary,status,priority"
 
-    resp = requests.get(
-        f"{base_url}/rest/api/3/search/jql",
-        headers=_HEADERS,
-        auth=auth,
+    resp = session.get(
+        "/rest/api/3/search/jql",
         params={
             "jql": jql,
             "maxResults": limit,
             "fields": fields_csv,
         },
-        timeout=15,
     )
     if resp.status_code == 200:
         return _parse_search_issues_payload(resp.json())
 
     if resp.status_code in (400, 404, 410, 405):
-        resp = requests.post(
-            f"{base_url}/rest/api/3/search/jql",
-            headers=_HEADERS,
-            auth=auth,
+        resp = session.post(
+            "/rest/api/3/search/jql",
             json={
                 "jql": jql,
                 "maxResults": limit,
                 "fields": ["summary", "status", "priority"],
             },
-            timeout=15,
         )
         if resp.status_code == 200:
             return _parse_search_issues_payload(resp.json())
 
-    # Legacy endpoint (removed on many Cloud sites; kept as last resort).
-    resp = requests.get(
-        f"{base_url}/rest/api/3/search",
-        headers=_HEADERS,
-        auth=auth,
+    resp = session.get(
+        "/rest/api/3/search",
         params={
             "jql": jql,
             "maxResults": limit,
             "fields": fields_csv,
         },
-        timeout=15,
     )
     if resp.status_code == 200:
         return _parse_search_issues_payload(resp.json())
@@ -295,7 +288,7 @@ def _search_jira_issues(
 
 
 def _issues_to_list_items(
-    base_url: str, issues: list[dict[str, Any]]
+    session: JiraSession, issues: list[dict[str, Any]]
 ) -> list[JiraIssueListItem]:
     results: list[JiraIssueListItem] = []
     for item in issues:
@@ -312,24 +305,18 @@ def _issues_to_list_items(
                     "name", "Unknown"
                 ),
                 priority=priority_obj.get("name") if priority_obj else None,
-                url=f"{base_url}/browse/{key}",
+                url=session.issue_browse_url(key),
             )
         )
     return results
 
 
 def _perform_transition(
-    base_url: str,
-    auth: HTTPBasicAuth,
+    session: JiraSession,
     issue_key: str,
     transition_names: list[str],
 ) -> TransitionResponse:
-    resp = requests.get(
-        f"{base_url}/rest/api/3/issue/{issue_key}/transitions",
-        headers=_HEADERS,
-        auth=auth,
-        timeout=10,
-    )
+    resp = session.get(f"/rest/api/3/issue/{issue_key}/transitions")
     if resp.status_code != 200:
         raise HTTPException(
             status_code=502,
@@ -353,12 +340,9 @@ def _perform_transition(
             ),
         )
 
-    resp = requests.post(
-        f"{base_url}/rest/api/3/issue/{issue_key}/transitions",
-        headers=_HEADERS,
-        auth=auth,
+    resp = session.post(
+        f"/rest/api/3/issue/{issue_key}/transitions",
         json={"transition": {"id": match["id"]}},
-        timeout=10,
     )
     if resp.status_code not in (200, 204):
         raise HTTPException(
@@ -373,8 +357,118 @@ def _perform_transition(
     )
 
 
+def _public_connection(uid: str) -> JiraConnectionPublic:
+    record = load_record(uid)
+    if record and record.connected:
+        return JiraConnectionPublic(
+            connected=True,
+            atlassian_account_id=record.atlassian_account_id,
+            cloud_id=record.cloud_id,
+            site_name=record.site_name,
+            site_url=record.site_url,
+            project_id=record.project_id,
+            project_key=record.project_key,
+            project_name=record.project_name,
+            auth_mode="oauth",
+        )
+    return JiraConnectionPublic(connected=False, auth_mode=None)
+
+
 # ---------------------------------------------------------------------------
-# Routes
+# OAuth routes
+# ---------------------------------------------------------------------------
+
+@router.get("/oauth/start", response_model=OAuthStartResponse)
+def jira_oauth_start(uid: str = Depends(verify_firebase_bearer)) -> OAuthStartResponse:
+    """Return Atlassian authorize URL for the signed-in Firebase user."""
+    try:
+        url = jira_oauth.build_authorize_url(uid)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return OAuthStartResponse(authorize_url=url)
+
+
+@router.get("/oauth/callback")
+def jira_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None):
+    """Exchange authorization code and redirect back to the web app."""
+    base = jira_oauth.frontend_base_url()
+    if error:
+        return RedirectResponse(f"{base}/settings?jira=error&reason={error}")
+    if not code or not state:
+        return RedirectResponse(f"{base}/settings?jira=error&reason=missing_params")
+    try:
+        uid = jira_oauth.verify_oauth_state(state)
+        tokens = jira_oauth.exchange_code_for_tokens(code)
+    except (ValueError, RuntimeError) as exc:
+        return RedirectResponse(f"{base}/settings?jira=error&reason=oauth_failed")
+    record = load_record(uid) or JiraOAuthRecord(uid=uid)
+    try:
+        jira_oauth.apply_tokens_to_record(record, tokens)
+    except RuntimeError:
+        return RedirectResponse(f"{base}/settings?jira=error&reason=resources_failed")
+    return RedirectResponse(f"{base}/settings?jira=connected")
+
+
+@router.get("/connection", response_model=JiraConnectionPublic)
+def jira_connection(uid: str = Depends(verify_firebase_bearer)) -> JiraConnectionPublic:
+    """Public Jira connection status (no tokens)."""
+    return _public_connection(uid)
+
+
+@router.get("/sites", response_model=list[JiraSite])
+def jira_list_sites(uid: str = Depends(verify_firebase_bearer)) -> list[JiraSite]:
+    record = load_record(uid)
+    if not record or not record.connected:
+        raise HTTPException(status_code=404, detail="Jira is not connected via OAuth.")
+    try:
+        access = jira_oauth.ensure_fresh_access_token(record)
+        resources = jira_oauth.fetch_accessible_resources(access)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return [
+        JiraSite(
+            cloud_id=str(r.get("id") or ""),
+            name=str(r.get("name") or ""),
+            url=str(r.get("url") or ""),
+        )
+        for r in resources
+        if r.get("id")
+    ]
+
+
+@router.post("/default-project", response_model=JiraConnectionPublic)
+def jira_set_default_project(
+    body: DefaultProjectRequest,
+    uid: str = Depends(verify_firebase_bearer),
+) -> JiraConnectionPublic:
+    record = load_record(uid)
+    if not record or not record.connected:
+        raise HTTPException(status_code=404, detail="Jira OAuth is not connected.")
+    if body.cloud_id and body.cloud_id != record.cloud_id:
+        try:
+            access = jira_oauth.ensure_fresh_access_token(record)
+            jira_oauth.apply_tokens_to_record(
+                record,
+                {"access_token": access, "refresh_token": record.refresh_token, "expires_in": 3600},
+                pick_cloud_id=body.cloud_id,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    record.project_key = body.project_key.strip()
+    record.project_id = body.project_id
+    record.project_name = body.project_name
+    save_record(record)
+    return _public_connection(uid)
+
+
+@router.delete("/connection")
+def jira_disconnect(uid: str = Depends(verify_firebase_bearer)) -> dict[str, bool]:
+    delete_record(uid)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Jira API proxy routes
 # ---------------------------------------------------------------------------
 
 @router.get("/config")
@@ -389,16 +483,10 @@ def jira_config_status() -> JiraConfigStatus:
 
 
 @router.post("/config/test")
-def jira_test_connection(config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config)) -> JiraTestResult:
+def jira_test_connection(session: JiraSession = Depends(resolve_jira_session)) -> JiraTestResult:
     """Validate Jira credentials by calling /rest/api/3/myself."""
-    base_url, auth, _ = config
     try:
-        resp = requests.get(
-            f"{base_url}/rest/api/3/myself",
-            headers=_HEADERS,
-            auth=auth,
-            timeout=10,
-        )
+        resp = session.get("/rest/api/3/myself", timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             return JiraTestResult(
@@ -410,18 +498,15 @@ def jira_test_connection(config: tuple[str, HTTPBasicAuth, str | None] = Depends
             ok=False,
             message=f"Jira returned {resp.status_code}: {resp.text[:300]}",
         )
-    except requests.RequestException as e:
+    except OSError as e:
         return JiraTestResult(ok=False, message=f"Connection error: {e!s}")
 
 
 @router.get("/projects")
-def list_jira_projects(config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config)) -> list[JiraProject]:
+def list_jira_projects(session: JiraSession = Depends(resolve_jira_session)) -> list[JiraProject]:
     """List Jira projects accessible to the configured user."""
-    base_url, auth, _ = config
-    resp = requests.get(
-        f"{base_url}/rest/api/3/project/search",
-        headers=_HEADERS,
-        auth=auth,
+    resp = session.get(
+        "/rest/api/3/project/search",
         params={"maxResults": 50, "orderBy": "name"},
         timeout=10,
     )
@@ -441,22 +526,21 @@ def list_jira_projects(config: tuple[str, HTTPBasicAuth, str | None] = Depends(g
 def list_jira_project_issues(
     project_key: str,
     max_results: int = 50,
-    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+    session: JiraSession = Depends(resolve_jira_session),
 ) -> list[JiraIssueListItem]:
     """List issues in a Jira project (for importing into letAICook tasks)."""
-    base_url, auth, _ = config
     jql = f'project = "{project_key}" ORDER BY updated DESC'
-    issues = _search_jira_issues(base_url, auth, jql, max_results)
-    return _issues_to_list_items(base_url, issues)
+    issues = _search_jira_issues(session, jql, max_results)
+    return _issues_to_list_items(session, issues)
 
 
 @router.post("/issues", response_model=CreateJiraIssueResponse)
 def create_jira_issue(
     body: CreateJiraIssueRequest,
-    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+    session: JiraSession = Depends(resolve_jira_session),
 ) -> CreateJiraIssueResponse:
     """Create a single Jira issue."""
-    base_url, auth, default_proj = config
+    default_proj = session.default_project
     project_key = body.project_key or default_proj
     if not project_key:
         raise HTTPException(
@@ -477,13 +561,7 @@ def create_jira_issue(
     if body.labels:
         fields["labels"] = body.labels
 
-    resp = requests.post(
-        f"{base_url}/rest/api/3/issue",
-        headers=_HEADERS,
-        auth=auth,
-        json={"fields": fields},
-        timeout=15,
-    )
+    resp = session.post("/rest/api/3/issue", json={"fields": fields}, timeout=15)
     if resp.status_code not in (200, 201):
         raise HTTPException(
             status_code=502,
@@ -494,7 +572,7 @@ def create_jira_issue(
     issue_key = data["key"]
     return CreateJiraIssueResponse(
         issue_key=issue_key,
-        issue_url=f"{base_url}/browse/{issue_key}",
+        issue_url=session.issue_browse_url(issue_key),
         issue_id=data["id"],
     )
 
@@ -502,14 +580,11 @@ def create_jira_issue(
 @router.get("/issues/{issue_key}", response_model=JiraIssueStatus)
 def get_jira_issue(
     issue_key: str,
-    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+    session: JiraSession = Depends(resolve_jira_session),
 ) -> JiraIssueStatus:
     """Fetch current status of a Jira issue."""
-    base_url, auth, _ = config
-    resp = requests.get(
-        f"{base_url}/rest/api/3/issue/{issue_key}",
-        headers=_HEADERS,
-        auth=auth,
+    resp = session.get(
+        f"/rest/api/3/issue/{issue_key}",
         params={"fields": "summary,status,priority,assignee"},
         timeout=10,
     )
@@ -532,7 +607,7 @@ def get_jira_issue(
         status_category=status_obj.get("statusCategory", {}).get("name", "Unknown"),
         priority=priority_obj.get("name") if priority_obj else None,
         assignee=assignee_obj.get("displayName") if assignee_obj else None,
-        url=f"{base_url}/browse/{issue_key}",
+        url=session.issue_browse_url(issue_key),
     )
 
 
@@ -540,23 +615,19 @@ def get_jira_issue(
 def transition_jira_issue(
     issue_key: str,
     body: TransitionRequest,
-    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+    session: JiraSession = Depends(resolve_jira_session),
 ) -> TransitionResponse:
     """Transition a Jira issue to a new status (e.g. 'In Progress', 'Done')."""
-    base_url, auth, _ = config
-    return _perform_transition(
-        base_url, auth, issue_key, [body.transition_name]
-    )
+    return _perform_transition(session, issue_key, [body.transition_name])
 
 
 @router.put("/issues/{issue_key}", response_model=UpdateJiraIssueResponse)
 def update_jira_issue(
     issue_key: str,
     body: UpdateJiraIssueRequest,
-    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+    session: JiraSession = Depends(resolve_jira_session),
 ) -> UpdateJiraIssueResponse:
     """Update summary, description, and/or priority of a Jira issue."""
-    base_url, auth, _ = config
     fields: dict[str, Any] = {}
     if body.summary is not None:
         fields["summary"] = body.summary
@@ -569,13 +640,7 @@ def update_jira_issue(
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update.")
 
-    resp = requests.put(
-        f"{base_url}/rest/api/3/issue/{issue_key}",
-        headers=_HEADERS,
-        auth=auth,
-        json={"fields": fields},
-        timeout=15,
-    )
+    resp = session.put(f"/rest/api/3/issue/{issue_key}", json={"fields": fields}, timeout=15)
     if resp.status_code == 404:
         raise HTTPException(status_code=404, detail=f"Issue {issue_key} not found in Jira.")
     if resp.status_code not in (200, 204):
@@ -586,23 +651,17 @@ def update_jira_issue(
 
     return UpdateJiraIssueResponse(
         issue_key=issue_key,
-        issue_url=f"{base_url}/browse/{issue_key}",
+        issue_url=session.issue_browse_url(issue_key),
     )
 
 
 @router.delete("/issues/{issue_key}", response_model=DeleteJiraIssueResponse)
 def delete_jira_issue(
     issue_key: str,
-    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+    session: JiraSession = Depends(resolve_jira_session),
 ) -> DeleteJiraIssueResponse:
     """Delete a Jira issue."""
-    base_url, auth, _ = config
-    resp = requests.delete(
-        f"{base_url}/rest/api/3/issue/{issue_key}",
-        headers=_HEADERS,
-        auth=auth,
-        timeout=15,
-    )
+    resp = session.delete(f"/rest/api/3/issue/{issue_key}", timeout=15)
     if resp.status_code == 404:
         raise HTTPException(status_code=404, detail=f"Issue {issue_key} not found in Jira.")
     if resp.status_code not in (200, 204):
@@ -617,10 +676,9 @@ def delete_jira_issue(
 def sync_jira_issue_status(
     issue_key: str,
     body: SyncStatusRequest,
-    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+    session: JiraSession = Depends(resolve_jira_session),
 ) -> TransitionResponse:
     """Transition a Jira issue using letAICook task status names."""
-    base_url, auth, _ = config
     key = body.status.lower().strip()
     candidates = _STATUS_TO_TRANSITION.get(key)
     if not candidates:
@@ -629,16 +687,16 @@ def sync_jira_issue_status(
             detail=f"Unknown letAICook status '{body.status}'. "
             f"Expected one of: {list(_STATUS_TO_TRANSITION)}",
         )
-    return _perform_transition(base_url, auth, issue_key, candidates)
+    return _perform_transition(session, issue_key, candidates)
 
 
 @router.post("/issues/batch", response_model=BatchCreateResponse)
 def batch_create_jira_issues(
     body: BatchCreateRequest,
-    config: tuple[str, HTTPBasicAuth, str | None] = Depends(get_jira_config),
+    session: JiraSession = Depends(resolve_jira_session),
 ) -> BatchCreateResponse:
     """Create multiple Jira issues at once (e.g. from system designer)."""
-    base_url, auth, default_proj = config
+    default_proj = session.default_project
     project_key = body.project_key or default_proj
     if not project_key:
         raise HTTPException(
@@ -652,7 +710,7 @@ def batch_create_jira_issues(
     for i, issue in enumerate(body.issues):
         try:
             issue.project_key = issue.project_key or project_key
-            result = create_jira_issue(issue, config=config)
+            result = create_jira_issue(issue, session=session)
             created.append(result)
         except HTTPException as e:
             errors.append({"index": i, "summary": issue.summary, "error": e.detail})

@@ -1,13 +1,15 @@
 "use client";
 
 import {
+  GoogleAuthProvider,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   type User,
 } from "firebase/auth";
-import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import {
   createContext,
   useCallback,
@@ -33,6 +35,7 @@ type AuthState = {
 
 type AuthContextValue = AuthState & {
   signInEmail: (email: string, password: string) => Promise<void>;
+  signInGoogle: () => Promise<void>;
   signUpEmail: (email: string, password: string, displayName: string, teamId: string, role: UserRole) => Promise<void>;
   signOutUser: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -95,11 +98,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [user?.uid]);
 
+  const ensureProfileForUser = useCallback(async (u: User) => {
+    const ref = doc(getFirestoreDb(), USERS_COLLECTION, u.uid);
+    const snap = await getDoc(ref);
+    if (snap.exists()) return;
+    const now = serverTimestamp();
+    const email = u.email?.trim().toLowerCase() ?? "";
+    await setDoc(ref, {
+      displayName: u.displayName?.trim() || email || "User",
+      role: "worker" satisfies UserRole,
+      teamId: "",
+      emailLower: email,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }, []);
+
   const signInEmail = useCallback(async (email: string, password: string) => {
     setError(null);
     const auth = getFirebaseAuth();
     await signInWithEmailAndPassword(auth, email.trim(), password);
   }, []);
+
+  const signInGoogle = useCallback(async () => {
+    setError(null);
+    const auth = getFirebaseAuth();
+    const provider = new GoogleAuthProvider();
+    const cred = await signInWithPopup(auth, provider);
+    await ensureProfileForUser(cred.user);
+  }, [ensureProfileForUser]);
 
   const signUpEmail = useCallback(
     async (email: string, password: string, displayName: string, teamId: string, role: UserRole) => {
@@ -137,6 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       signInEmail,
+      signInGoogle,
       signUpEmail,
       signOutUser,
       refreshProfile,
@@ -147,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       signInEmail,
+      signInGoogle,
       signUpEmail,
       signOutUser,
       refreshProfile,

@@ -11,7 +11,9 @@ import { getPublicApiBaseUrl } from "@/lib/api-base";
 import { getFirestoreDb } from "@/lib/firebase";
 import {
   batchCreateJiraIssues,
+  hasJiraAccess,
   jiraCredentialsFromProfile,
+  resolveJiraClientAuth,
 } from "@/lib/jira-client";
 import {
   PLANNING_CONTEXT_KEY,
@@ -371,8 +373,9 @@ export function SystemDesignerClient() {
       alert("No tasks generated to push.");
       return;
     }
-    const creds = jiraCredentialsFromProfile(profile);
-    if (!creds) {
+    const jiraAuth = resolveJiraClientAuth(user, profile);
+    const manualCreds = jiraCredentialsFromProfile(profile);
+    if (!jiraAuth || !(await hasJiraAccess(jiraAuth, profile))) {
       setError("Connect Jira in Settings before pushing issues.");
       return;
     }
@@ -380,7 +383,7 @@ export function SystemDesignerClient() {
     setError(null);
     try {
       const data = await batchCreateJiraIssues(
-        creds,
+        jiraAuth,
         rawTasks.map((t) => {
           const row = t as { title?: unknown; description?: unknown };
           return {
@@ -391,6 +394,8 @@ export function SystemDesignerClient() {
             priority: "medium",
           };
         }),
+        manualCreds?.defaultProject,
+        manualCreds,
       );
       const failed = data.errors?.length ?? 0;
       alert(

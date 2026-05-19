@@ -27,7 +27,7 @@ def test_jira_requires_credentials():
     assert r.status_code == 503
 
 
-@patch("letaicook_api.routers.jira.requests.get")
+@patch("letaicook_api.services.jira_session.JiraSession.get")
 def test_jira_test_connection_ok(mock_get: MagicMock):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -41,13 +41,13 @@ def test_jira_test_connection_ok(mock_get: MagicMock):
     assert body["user"] == "Dev User"
 
 
-@patch("letaicook_api.routers.jira.requests.post")
-@patch("letaicook_api.routers.jira.requests.put")
+@patch("letaicook_api.services.jira_session.JiraSession.post")
+@patch("letaicook_api.services.jira_session.JiraSession.put")
 def test_jira_update_and_delete(mock_put: MagicMock, mock_post: MagicMock):
     mock_put.return_value = MagicMock(status_code=204, text="")
     mock_post.return_value = MagicMock(status_code=204, text="")
 
-    with patch("letaicook_api.routers.jira.requests.delete") as mock_delete:
+    with patch("letaicook_api.services.jira_session.JiraSession.delete") as mock_delete:
         mock_delete.return_value = MagicMock(status_code=204, text="")
 
         r = client.put(
@@ -63,8 +63,8 @@ def test_jira_update_and_delete(mock_put: MagicMock, mock_post: MagicMock):
         assert r2.json()["ok"] is True
 
 
-@patch("letaicook_api.routers.jira.requests.post")
-@patch("letaicook_api.routers.jira.requests.get")
+@patch("letaicook_api.services.jira_session.JiraSession.post")
+@patch("letaicook_api.services.jira_session.JiraSession.get")
 def test_jira_sync_status(mock_get: MagicMock, mock_post: MagicMock):
     mock_get.return_value = MagicMock(
         status_code=200,
@@ -85,10 +85,10 @@ def test_jira_sync_status(mock_get: MagicMock, mock_post: MagicMock):
     assert r.json()["new_status"] == "In Progress"
 
 
-@patch("letaicook_api.routers.jira.requests.get")
+@patch("letaicook_api.services.jira_session.JiraSession.get")
 def test_list_project_issues(mock_get: MagicMock):
-    def fake_get(url, **kwargs):
-        if "search/jql" in url:
+    def fake_get(path, **kwargs):
+        if "search/jql" in path:
             return MagicMock(
                 status_code=200,
                 text="",

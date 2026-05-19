@@ -10,6 +10,9 @@ venv/
 !.env.example
 deploy/cloudrun-env.yaml
 
+# Atlassian OAuth token store (server-side only; contains refresh tokens)
+.jira_oauth_data/
+
 # Firebase / GCP service accounts (never commit)
 *credentials*.json
 *firebase-adminsdk*.json
