@@ -5,26 +5,30 @@ import { AmbientBackground } from "@/components/ui/ambient-background";
 import { FadeIn } from "@/components/ui/motion";
 import { IconSparkle } from "@/components/ui/nav-icons";
 import { useAuth } from "@/contexts/auth-context";
+import { resolveSignedInUser } from "@/lib/auth-session";
+import { clearAuthReturnUrl, readAuthReturnUrl } from "@/lib/auth-redirect";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 export function LoginInner() {
-  const { user, profile, loading, signOutUser } = useAuth();
+  const { user, profile, loading, error: authError, signOutUser } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const returnUrl = searchParams.get("returnUrl") || "/chat";
-  const safeReturn =
-    returnUrl.startsWith("/") && !returnUrl.startsWith("//") ? returnUrl : "/chat";
+  const safeReturn = useMemo(
+    () => readAuthReturnUrl(searchParams.get("returnUrl")),
+    [searchParams],
+  );
+
+  const signedIn = resolveSignedInUser(user);
 
   useEffect(() => {
-    if (loading) return;
-    if (user && profile) {
-      router.replace(safeReturn);
-    }
-  }, [user, profile, loading, router, safeReturn]);
+    if (loading || !signedIn) return;
+    clearAuthReturnUrl();
+    router.replace(safeReturn);
+  }, [signedIn, loading, safeReturn, router]);
 
-  if (loading || (user && profile)) {
+  if (loading || signedIn) {
     return (
       <div className="flex min-h-screen items-center justify-center app-mesh">
         <div className="h-10 w-10 animate-spin rounded-full border-2 border-app-border border-t-app-accent" />
@@ -104,6 +108,11 @@ export function LoginInner() {
               </p>
             </div>
             <AuthForm />
+            {authError ? (
+              <p className="mt-4 rounded-lg border border-red-500/40 bg-red-950/40 px-3 py-2 text-sm text-red-300">
+                {authError}
+              </p>
+            ) : null}
             <Link
               href="/"
               className="mt-8 block text-center text-sm text-app-muted underline-offset-4 hover:text-app-accent hover:underline lg:text-left"

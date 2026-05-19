@@ -2,12 +2,27 @@
 
 import { GlassCard } from "@/components/ui/glass-card";
 import { useAuth } from "@/contexts/auth-context";
+import { formatAuthError } from "@/lib/auth-errors";
+import {
+  clearAuthReturnUrl,
+  readAuthReturnUrl,
+  stashAuthReturnUrl,
+} from "@/lib/auth-redirect";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 const inputClass = "app-input";
 
 export function AuthForm() {
   const { signInEmail, signInGoogle, signUpEmail } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  function goAfterSignIn() {
+    const dest = readAuthReturnUrl(searchParams.get("returnUrl"));
+    clearAuthReturnUrl();
+    router.replace(dest);
+  }
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,9 +36,11 @@ export function AuthForm() {
     setBusy(true);
     setError(null);
     try {
+      stashAuthReturnUrl(readAuthReturnUrl(searchParams.get("returnUrl")));
       await signInGoogle();
+      goAfterSignIn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Google sign-in failed");
+      setError(formatAuthError(err));
     } finally {
       setBusy(false);
     }
@@ -36,6 +53,8 @@ export function AuthForm() {
     try {
       if (authMode === "signin") {
         await signInEmail(email, password);
+        goAfterSignIn();
+        return;
       } else {
         if (!teamId.trim()) {
           throw new Error("Team ID is required to create an account.");
@@ -44,7 +63,7 @@ export function AuthForm() {
       }
       setPassword("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed");
+      setError(formatAuthError(err));
     } finally {
       setBusy(false);
     }

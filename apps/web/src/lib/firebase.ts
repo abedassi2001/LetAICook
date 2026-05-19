@@ -1,6 +1,7 @@
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getAnalytics, type Analytics } from "firebase/analytics";
 import { connectAuthEmulator, getAuth, type Auth } from "firebase/auth";
+import { ensureAuthPersistence } from "@/lib/firebase-auth-init";
 import {
   connectFirestoreEmulator,
   getFirestore,
@@ -73,3 +74,5 @@ export function getFirebaseAuth(): Auth {
   }
   return auth;
 }
+
+export { ensureAuthPersistence };
