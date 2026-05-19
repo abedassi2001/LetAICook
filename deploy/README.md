@@ -1,12 +1,14 @@
 # Deploy letAIcook to Firebase + Google Cloud
 
-Customers open a **public link** (Firebase Hosting). Auth and tasks use **Firestore** (already in your Firebase project). **Gemini + Jira** run on **Cloud Run** (FastAPI).
+Customers open the **Cloud Run web** URL. Auth and tasks use **Firestore** (Firebase project). **Gemini + Jira** run on **Cloud Run** (FastAPI).
 
 | Piece | Service | Public URL |
 |-------|---------|------------|
-| Web (Next.js) | Firebase Hosting (frameworks) | `https://<PROJECT_ID>.web.app` |
-| API (FastAPI) | Cloud Run | `https://letaicook-api-….run.app` |
+| Web (Next.js) | Cloud Run (`letaicook-web`) | `https://letaicook-web-….run.app` |
+| API (FastAPI) | Cloud Run (`letaicook-api`) | `https://letaicook-api-….run.app` |
 | Database / login | Firebase Auth + Firestore | same Firebase project |
+
+**CI:** push to `main` runs [`.github/workflows/deploy-firebase.yml`](../.github/workflows/deploy-firebase.yml) (API + web on Cloud Run, Firestore rules). `FIREBASE_TOKEN` is not required.
 
 ---
 
