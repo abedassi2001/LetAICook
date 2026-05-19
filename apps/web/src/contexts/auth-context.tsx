@@ -75,9 +75,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     let unsubAuth = () => {};
-    const auth = getFirebaseAuth();
 
     void (async () => {
+      let auth;
+      try {
+        auth = getFirebaseAuth();
+      } catch (e) {
+        if (!cancelled) {
+          setError(formatAuthError(e));
+          setLoading(false);
+        }
+        return;
+      }
+
       await ensureAuthPersistence(auth);
       if (cancelled) return;
 
