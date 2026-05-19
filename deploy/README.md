@@ -110,17 +110,17 @@ Workflow: [`.github/workflows/deploy-firebase.yml`](../.github/workflows/deploy-
 
 On every push to `main` (or manual **Run workflow**):
 
-1. Builds and deploys **API** → Cloud Run  
-2. Builds **web** with production env → **Firebase Hosting**
+1. Builds and deploys **API** → Cloud Run (`letaicook-api`)
+2. Builds and deploys **web** → Cloud Run (`letaicook-web`), updates API CORS
+3. Deploys **Firestore rules** (`firebase deploy --only firestore:rules`)
 
 Add these **GitHub repository secrets**:
 
 | Secret | Purpose |
 |--------|---------|
 | `GCP_PROJECT_ID` | e.g. `letaicook` |
-| `GCP_SA_KEY` | Service account JSON (roles: Cloud Run Admin, Artifact Registry Writer, Firebase Hosting Admin) |
+| `GCP_SA_KEY` | JSON for **github-deploy** service account (see IAM below) |
 | `GOOGLE_API_KEY` | Gemini key for API |
-| `FIREBASE_TOKEN` | From `firebase login:ci` |
 | `FIREBASE_WEB_API_KEY` | Web SDK apiKey |
 | `FIREBASE_AUTH_DOMAIN` | authDomain |
 | `FIREBASE_PROJECT_ID` | projectId |
@@ -128,7 +128,49 @@ Add these **GitHub repository secrets**:
 | `FIREBASE_MESSAGING_SENDER_ID` | messagingSenderId |
 | `FIREBASE_APP_ID` | appId |
 
-Optional variable: `GCP_REGION` (default `us-central1`).
+Optional variables: `GCP_REGION` (default `us-central1`), `CLOUD_RUN_SERVICE`, `CLOUD_RUN_WEB_SERVICE`.
+
+### IAM for `github-deploy` (fixes CI `403` on Firestore rules)
+
+In [Google Cloud Console → IAM](https://console.cloud.google.com/iam-admin/iam), grant the **github-deploy@…** service account (the one in `GCP_SA_KEY`):
+
+| Role | Why |
+|------|-----|
+| **Cloud Run Admin** | Deploy API + web |
+| **Artifact Registry Administrator** | Push Docker images |
+| **Service Account User** | Act as runtime SA if needed |
+| **Service Usage Admin** | Enable APIs in CI |
+| **Firebase Rules Admin** (`roles/firebaserules.admin`) | `firebase deploy --only firestore:rules` (fixes `firebaserules.googleapis.com` 403) |
+
+Or use **Firebase Admin** (`roles/firebase.admin`) instead of Rules Admin if you prefer one broader role.
+
+PowerShell (replace email if your SA name differs):
+
+```powershell
+$Project = "letaicook"
+$Sa = "github-deploy@${Project}.iam.gserviceaccount.com"
+gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$Sa" --role="roles/firebaserules.admin"
+```
+
+Re-run the failed GitHub Actions workflow after IAM propagates (~1–2 minutes).
+
+### Chrome shows “This page couldn’t load” but Cloud Run looks healthy
+
+The service can return **HTTP 200** while Chrome still fails (often **HTTP/3 / QUIC** or campus Wi‑Fi blocking UDP).
+
+1. **Quick test** — open: `https://YOUR-WEB-URL/health`  
+   Should show `{"ok":true,"service":"letaicook-web"}`.  
+   If `/health` works but `/` does not, the issue is client-side (hydration/extensions), not Cloud Run.
+
+2. **PowerShell** (same PC as Chrome):  
+   `curl.exe -sI "https://YOUR-WEB-URL/"`  
+   If you see `HTTP/1.1 200 OK`, the server is up; fix the browser/network below.
+
+3. **Chrome** → `chrome://flags` → search **QUIC** → set **Experimental QUIC protocol** to **Disabled** → relaunch Chrome.
+
+4. Try **phone hotspot** (bypass university firewall).
+
+5. In Cloud Run, set **letaicook-web** → **Minimum instances = 1** (avoids cold-start timeouts). CI and `deploy-web-cloudrun.ps1` do this on the next deploy.
 
 ---
 

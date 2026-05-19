@@ -53,7 +53,10 @@ Write-Host "Deploying to Cloud Run..."
     --ingress all `
     --port 8080 `
     --memory 1Gi `
-    --cpu 1
+    --cpu 1 `
+    --min-instances 1 `
+    --cpu-boost `
+    --timeout 300
 
 $Url = & $Gcloud run services describe $Service --region $Region --format="value(status.url)"
 Write-Host ""
