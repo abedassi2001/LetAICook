@@ -139,12 +139,13 @@ Add these **GitHub repository secrets**:
 | `GCP_PROJECT_ID` | e.g. `letaicook` |
 | `GCP_SA_KEY` | JSON for **github-deploy** service account (see IAM below) |
 | `GOOGLE_API_KEY` | Gemini key for API |
-| `FIREBASE_WEB_API_KEY` | Web SDK apiKey |
-| `FIREBASE_AUTH_DOMAIN` | authDomain |
-| `FIREBASE_PROJECT_ID` | projectId |
-| `FIREBASE_STORAGE_BUCKET` | storageBucket |
-| `FIREBASE_MESSAGING_SENDER_ID` | messagingSenderId |
-| `FIREBASE_APP_ID` | appId |
+| `FIREBASE_WEB_API_KEY` | Firebase web **apiKey** (required) |
+| `FIREBASE_MESSAGING_SENDER_ID` | Firebase **messagingSenderId** (required) |
+| `FIREBASE_APP_ID` | Firebase **appId** (required) |
+
+Optional (CI defaults from `GCP_PROJECT_ID` if omitted): `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`.
+
+Copy the three required values from [Firebase Console](https://console.firebase.google.com) → Project settings → Your apps → Web app config.
 
 Optional variables: `GCP_REGION` (default `us-central1`), `CLOUD_RUN_SERVICE`, `CLOUD_RUN_WEB_SERVICE`.
 
