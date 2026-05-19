@@ -145,7 +145,7 @@ Add these **GitHub repository secrets**:
 
 Optional (CI defaults from `GCP_PROJECT_ID` if omitted): `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`.
 
-Copy the three required values from [Firebase Console](https://console.firebase.google.com) → Project settings → Your apps → Web app config.
+Copy the three required values from [Firebase Console](https://console.firebase.google.com) → Project settings → Your apps → Web app config, or from `apps/web/.env.production.local` (see [GITHUB_SECRETS.md](./GITHUB_SECRETS.md)).
 
 Optional variables: `GCP_REGION` (default `us-central1`), `CLOUD_RUN_SERVICE`, `CLOUD_RUN_WEB_SERVICE`.
 
