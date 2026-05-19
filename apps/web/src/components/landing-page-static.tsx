@@ -5,7 +5,6 @@ import {
   IconSparkle,
   IconTasks,
 } from "@/components/ui/nav-icons";
-import Link from "next/link";
 
 const features = [
   {
@@ -64,15 +63,15 @@ export function LandingPageStatic() {
         </div>
 
         <div className="mt-10 flex flex-col gap-3 sm:flex-row">
-          <Link href="/login" className="btn-primary px-8 py-3.5 text-center">
+          <a href="/login" className="btn-primary px-8 py-3.5 text-center">
             Get started
-          </Link>
-          <Link
+          </a>
+          <a
             href="/login?returnUrl=%2Fchat"
             className="btn-secondary px-8 py-3.5 text-center"
           >
             Open planning chat
-          </Link>
+          </a>
         </div>
 
         <div className="feature-carousel mt-16 lg:mt-20">

@@ -1,13 +1,10 @@
 "use client";
 
 import { AuthForm } from "@/components/auth-form";
-import { AmbientBackground } from "@/components/ui/ambient-background";
-import { FadeIn } from "@/components/ui/motion";
 import { IconSparkle } from "@/components/ui/nav-icons";
 import { useAuth } from "@/contexts/auth-context";
 import { resolveSignedInUser } from "@/lib/auth-session";
 import { clearAuthReturnUrl, readAuthReturnUrl } from "@/lib/auth-redirect";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo } from "react";
 
@@ -38,7 +35,7 @@ export function LoginInner() {
 
   if (user && !profile) {
     return (
-      <AmbientBackground variant="hero" className="flex min-h-screen flex-col items-center justify-center px-4">
+      <div className="relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden px-4 app-mesh">
         <div className="glass-panel-strong max-w-md rounded-2xl p-6 text-amber-100">
           <p className="font-medium">No Firestore profile</p>
           <p className="mt-2 text-sm opacity-90">
@@ -54,50 +51,48 @@ export function LoginInner() {
             Sign out
           </button>
         </div>
-        <Link href="/" className="mt-8 text-sm text-app-muted hover:text-app-accent">
+        <a href="/" className="mt-8 text-sm text-app-muted hover:text-app-accent">
           ← Home
-        </Link>
-      </AmbientBackground>
+        </a>
+      </div>
     );
   }
 
   return (
-    <AmbientBackground variant="hero" className="min-h-screen">
+    <div className="relative isolate min-h-screen overflow-hidden app-mesh">
       <div className="mx-auto grid min-h-screen max-w-6xl lg:grid-cols-2">
         <div className="hidden flex-col justify-center px-10 lg:flex">
-          <FadeIn>
-            <div className="inline-flex items-center gap-2 rounded-full border border-app-border-bright/50 bg-app-elevated/40 px-4 py-1.5 text-xs text-app-muted">
-              <IconSparkle className="h-3.5 w-3.5 text-app-accent" />
-              letAIcook workspace
-            </div>
-            <h1 className="mt-6 text-4xl font-bold tracking-tight">
-              <span className="text-gradient">Ship faster</span>
-              <br />
-              with AI planning
-            </h1>
-            <p className="mt-4 max-w-md text-lg leading-relaxed text-app-muted">
-              Sign in to access planning chat, system design, and your team task board — all in
-              one coordinated flow.
-            </p>
-            <ul className="mt-8 space-y-3 text-sm text-app-muted">
-              <li className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-app-accent" />
-                Gemini-powered project planning
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-app-violet" />
-                Architecture & diagram generation
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-app-accent-bright" />
-                Jira-synced task board
-              </li>
-            </ul>
-          </FadeIn>
+          <div className="inline-flex items-center gap-2 rounded-full border border-app-border-bright/50 bg-app-elevated/40 px-4 py-1.5 text-xs text-app-muted">
+            <IconSparkle className="h-3.5 w-3.5 text-app-accent" />
+            letAIcook workspace
+          </div>
+          <h1 className="mt-6 text-4xl font-bold tracking-tight">
+            <span className="text-gradient">Ship faster</span>
+            <br />
+            with AI planning
+          </h1>
+          <p className="mt-4 max-w-md text-lg leading-relaxed text-app-muted">
+            Sign in to access planning chat, system design, and your team task board — all in
+            one coordinated flow.
+          </p>
+          <ul className="mt-8 space-y-3 text-sm text-app-muted">
+            <li className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-app-accent" />
+              Gemini-powered project planning
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-app-violet" />
+              Architecture & diagram generation
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-app-accent-bright" />
+              Jira-synced task board
+            </li>
+          </ul>
         </div>
 
         <div className="flex flex-col items-center justify-center px-4 py-12 lg:px-10">
-          <FadeIn className="w-full max-w-md">
+          <div className="w-full max-w-md">
             <div className="mb-8 text-center lg:text-left">
               <p className="text-sm font-medium text-app-accent lg:hidden">letAIcook</p>
               <h2 className="mt-2 text-2xl font-semibold tracking-tight text-app-text">
@@ -113,15 +108,15 @@ export function LoginInner() {
                 {authError}
               </p>
             ) : null}
-            <Link
+            <a
               href="/"
               className="mt-8 block text-center text-sm text-app-muted underline-offset-4 hover:text-app-accent hover:underline lg:text-left"
             >
               ← Back to home
-            </Link>
-          </FadeIn>
+            </a>
+          </div>
         </div>
       </div>
-    </AmbientBackground>
+    </div>
   );
 }
