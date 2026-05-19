@@ -2,12 +2,7 @@
 
 import { useAuth } from "@/contexts/auth-context";
 import { getFirestoreDb } from "@/lib/firebase";
-import {
-  DEMO_PROJECT_ID,
-  type TaskDoc,
-  type TaskPriority,
-  type TaskStatus,
-} from "@/lib/task-model";
+import type { TaskDoc, TaskPriority, TaskStatus } from "@/lib/task-model";
 import {
   createJiraIssue,
   deleteJiraIssue,
@@ -15,13 +10,11 @@ import {
   jiraCredentialsFromProfile,
   jiraDisplayLabel,
   listJiraProjectIssues,
-  listJiraProjects,
   resolveJiraClientAuth,
   syncJiraIssueStatus,
   updateJiraIssue,
   type JiraConnectionInfo,
   type JiraIssueListItem,
-  type JiraProject,
 } from "@/lib/jira-client";
 import {
   jiraPriorityToTaskPriority,
@@ -29,7 +22,6 @@ import {
 } from "@/lib/jira-status-map";
 import { USERS_COLLECTION, type UserProfileDoc } from "@/lib/user-model";
 import {
-  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -50,13 +42,8 @@ import {
   where,
 } from "firebase/firestore";
 
-function tasksCollection(teamId: string) {
-  return collection(
-    getFirestoreDb(),
-    "projects",
-    teamId || DEMO_PROJECT_ID,
-    "tasks",
-  );
+function tasksCollection(projectId: string) {
+  return collection(getFirestoreDb(), "projects", projectId, "tasks");
 }
 
 const STATUSES: TaskStatus[] = [
@@ -76,7 +63,12 @@ function formatTs(value: TaskDoc["createdAt"] | null | undefined) {
 
 type WorkerOption = { uid: string; label: string };
 
-export function TasksBoard() {
+type TasksBoardProps = {
+  projectKey: string;
+  projectName?: string;
+};
+
+export function TasksBoard({ projectKey, projectName }: TasksBoardProps) {
   const { user, profile, loading: authLoading, error: authCtxError, signOutUser } =
     useAuth();
 
@@ -92,8 +84,6 @@ export function TasksBoard() {
   const [assigneeUid, setAssigneeUid] = useState<string>("");
   const [jiraNotice, setJiraNotice] = useState<string | null>(null);
   const [jiraBusy, setJiraBusy] = useState(false);
-  const [jiraProjects, setJiraProjects] = useState<JiraProject[]>([]);
-  const [selectedJiraProject, setSelectedJiraProject] = useState("");
   const [jiraLiveIssues, setJiraLiveIssues] = useState<JiraIssueListItem[]>([]);
   const [jiraConnection, setJiraConnection] = useState<JiraConnectionInfo | null>(null);
   const [hasJira, setHasJira] = useState(false);
@@ -101,7 +91,9 @@ export function TasksBoard() {
   const jiraImportKeyRef = useRef<string | null>(null);
   const jiraIssuesLoadKeyRef = useRef<string | null>(null);
   const itemsRef = useRef(items);
-  itemsRef.current = items;
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
 
   const isAdmin = profile?.role === "admin";
   const uid = user?.uid ?? "";
@@ -111,23 +103,16 @@ export function TasksBoard() {
   );
   const manualCreds = useMemo(
     () => jiraCredentialsFromProfile(profile),
-    [
-      profile?.jiraDomain,
-      profile?.jiraEmail,
-      profile?.jiraApiToken,
-      profile?.jiraDefaultProject,
-    ],
+    [profile],
   );
 
-  const activeJiraProject =
-    selectedJiraProject ||
-    jiraConnection?.project_key ||
-    manualCreds?.defaultProject ||
-    "";
+  const activeJiraProject = projectKey;
 
   const jiraBrowseBase =
     jiraConnection?.site_url?.replace(/\/$/, "") ||
-    (manualCreds?.domain ? `https://${manualCreds.domain.replace(/^https?:\/\//, "")}` : "");
+    (manualCreds?.domain
+      ? `https://${manualCreds.domain.replace(/^https?:\/\//, "")}`
+      : "");
 
   useEffect(() => {
     if (!jiraAuth) {
@@ -143,9 +128,6 @@ export function TasksBoard() {
           if (cancelled) return;
           setJiraConnection(conn);
           setHasJira(conn.connected || Boolean(manualCreds));
-          if (conn.project_key && !selectedJiraProject) {
-            setSelectedJiraProject(conn.project_key);
-          }
         } else {
           setHasJira(true);
         }
@@ -156,7 +138,7 @@ export function TasksBoard() {
     return () => {
       cancelled = true;
     };
-  }, [jiraAuth, manualCreds, selectedJiraProject]);
+  }, [jiraAuth, manualCreds]);
 
   const importFromJira = useCallback(
     async (force = false) => {
@@ -179,7 +161,6 @@ export function TasksBoard() {
             .map((i) => i.data.jiraIssueKey)
             .filter((k): k is string => Boolean(k)),
         );
-        const teamId = profile?.teamId || DEMO_PROJECT_ID;
         const now = serverTimestamp();
         let imported = 0;
 
@@ -190,7 +171,7 @@ export function TasksBoard() {
             issue.status_category,
           );
           const priority = jiraPriorityToTaskPriority(issue.priority);
-          await addDoc(tasksCollection(teamId), {
+          await addDoc(tasksCollection(projectKey), {
             title: issue.summary,
             description: `Imported from Jira (${issue.issue_key})`,
             status,
@@ -224,48 +205,8 @@ export function TasksBoard() {
         setJiraBusy(false);
       }
     },
-    [jiraAuth, hasJira, activeJiraProject, user, isAdmin, profile?.teamId, manualCreds],
+    [jiraAuth, hasJira, activeJiraProject, user, isAdmin, projectKey, manualCreds],
   );
-
-  useEffect(() => {
-    if (!profile?.jiraDefaultProject) return;
-    startTransition(() => {
-      setSelectedJiraProject(profile.jiraDefaultProject || "");
-    });
-  }, [profile?.jiraDefaultProject]);
-
-  useEffect(() => {
-    if (!jiraAuth || !hasJira) {
-      setJiraProjects([]);
-      setJiraLiveIssues([]);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const projects = await listJiraProjects(jiraAuth, manualCreds);
-        if (cancelled) return;
-        setJiraProjects(projects);
-        setSelectedJiraProject((current) => {
-          if (current) return current;
-          return (
-            projects.find((p) => p.key === profile?.jiraDefaultProject)?.key
-            ?? projects[0]?.key
-            ?? ""
-          );
-        });
-      } catch (e) {
-        if (!cancelled) {
-          setJiraNotice(
-            e instanceof Error ? e.message : "Could not load Jira projects.",
-          );
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [jiraAuth, hasJira, profile?.jiraDefaultProject, manualCreds]);
 
   const loadJiraLiveIssues = useCallback(
     async (force = false) => {
@@ -296,23 +237,10 @@ export function TasksBoard() {
   );
 
   useEffect(() => {
-    void loadJiraLiveIssues(false);
+    queueMicrotask(() => {
+      void loadJiraLiveIssues(false);
+    });
   }, [loadJiraLiveIssues]);
-
-  async function handleJiraProjectSelect(projectKey: string) {
-    setSelectedJiraProject(projectKey);
-    jiraImportKeyRef.current = null;
-    jiraIssuesLoadKeyRef.current = null;
-    if (!user) return;
-    try {
-      await updateDoc(doc(getFirestoreDb(), USERS_COLLECTION, user.uid), {
-        jiraDefaultProject: projectKey,
-        updatedAt: serverTimestamp(),
-      });
-    } catch {
-      /* profile listener will still use local selection */
-    }
-  }
 
   useEffect(() => {
     if (!isAdmin || !profile?.teamId) return;
@@ -357,8 +285,7 @@ export function TasksBoard() {
     queueMicrotask(() => {
       if (cancel.current) return;
       try {
-        const teamId = profile?.teamId || DEMO_PROJECT_ID;
-        const base = tasksCollection(teamId);
+        const base = tasksCollection(projectKey);
         const q = isAdmin
           ? query(base, orderBy("updatedAt", "desc"))
           : query(base, where("assigneeUid", "==", uid));
@@ -402,16 +329,17 @@ export function TasksBoard() {
       cancel.current = true;
       unsub?.();
     };
-  }, [user, profile, isAdmin, uid]);
+  }, [user, profile, isAdmin, uid, projectKey]);
 
   useEffect(() => {
     if (!tasksReady || !activeJiraProject || !hasJira) return;
-    void importFromJira(false);
+    queueMicrotask(() => {
+      void importFromJira(false);
+    });
   }, [tasksReady, activeJiraProject, hasJira, importFromJira]);
 
   function taskRef(taskId: string) {
-    const teamId = profile?.teamId || DEMO_PROJECT_ID;
-    return doc(getFirestoreDb(), "projects", teamId, "tasks", taskId);
+    return doc(getFirestoreDb(), "projects", projectKey, "tasks", taskId);
   }
 
   function canEditTaskDetails(data: TaskDoc) {
@@ -462,10 +390,6 @@ export function TasksBoard() {
       setJiraNotice("Connect Jira in Settings to create tasks.");
       return;
     }
-    if (!activeJiraProject && hasJira) {
-      setJiraNotice("Select a Jira project below before creating a task.");
-      return;
-    }
     const now = serverTimestamp();
     const dueAt =
       dueLocal.trim() !== ""
@@ -476,10 +400,9 @@ export function TasksBoard() {
         ? null
         : assigneeUid
       : user.uid;
-    const teamId = profile?.teamId || DEMO_PROJECT_ID;
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
-    const ref = await addDoc(tasksCollection(teamId), {
+    const ref = await addDoc(tasksCollection(projectKey), {
       title: trimmedTitle,
       description: trimmedDescription,
       status: "todo" satisfies TaskStatus,
@@ -573,6 +496,7 @@ export function TasksBoard() {
           summary: data.title,
           description: data.description || "",
           priority: data.priority,
+          project_key: projectKey,
         },
         manualCreds,
         activeJiraProject,
@@ -673,33 +597,18 @@ export function TasksBoard() {
         </p>
       ) : (
         <div className="rounded-xl border border-app-border bg-app-elevated/80 p-4 ring-1 ring-white/[0.04]">
-          <p className="text-sm font-medium text-app-text">Jira</p>
+          <p className="text-sm font-medium text-app-text">
+            Jira project{" "}
+            <span className="font-mono text-app-accent">{projectKey}</span>
+            {projectName ? (
+              <span className="font-normal text-app-muted"> — {projectName}</span>
+            ) : null}
+          </p>
           <p className="mt-1 text-xs text-app-muted">
             Connected to {jiraDisplayLabel(jiraConnection, profile) ?? "Jira"}
             {jiraBusy ? " · syncing…" : ""}
           </p>
-          {jiraProjects.length > 0 ? (
-            <div className="mt-3">
-              <label className="mb-1 block text-xs font-medium text-app-muted">
-                Your Jira projects
-              </label>
-              <select
-                value={activeJiraProject}
-                onChange={(e) => void handleJiraProjectSelect(e.target.value)}
-                className="w-full max-w-md rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text"
-              >
-                {jiraProjects.map((p) => (
-                  <option key={p.id} value={p.key}>
-                    {p.key} — {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <p className="mt-2 text-xs text-app-muted">Loading projects…</p>
-          )}
-          {activeJiraProject ? (
-            <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
                 disabled={jiraBusy}
@@ -720,14 +629,13 @@ export function TasksBoard() {
                 }}
                 className="rounded-lg border border-app-accent/40 px-3 py-1.5 text-xs font-medium text-app-accent hover:bg-app-accent/10 disabled:opacity-50"
               >
-                Import into task board
+                Import from Jira
               </button>
             </div>
-          ) : null}
           {jiraLiveIssues.length > 0 ? (
             <div className="mt-4">
               <h3 className="text-xs font-medium uppercase tracking-wide text-app-muted">
-                Issues in {activeJiraProject} ({jiraLiveIssues.length})
+                Issues in Jira ({jiraLiveIssues.length})
               </h3>
               <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
                 {jiraLiveIssues.map((issue) => (
@@ -752,9 +660,9 @@ export function TasksBoard() {
                 ))}
               </ul>
             </div>
-          ) : activeJiraProject && !jiraBusy ? (
+          ) : !jiraBusy ? (
             <p className="mt-3 text-xs text-app-muted">
-              No issues in project {activeJiraProject} (or still loading).
+              No issues in this Jira project (or still loading).
             </p>
           ) : null}
         </div>
@@ -852,7 +760,7 @@ export function TasksBoard() {
           </div>
           <button
             type="submit"
-            disabled={jiraBusy || (hasJira && !activeJiraProject)}
+            disabled={jiraBusy}
             className="w-fit rounded-lg bg-app-accent px-4 py-2 text-sm font-semibold text-app-on-accent hover:bg-app-accent-bright disabled:opacity-50"
           >
             {hasJira ? "Create task & send to Jira" : "Publish task"}

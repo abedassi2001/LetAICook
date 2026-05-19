@@ -23,9 +23,9 @@ const features = [
   },
   {
     icon: IconTasks,
-    title: "Task board + Jira",
+    title: "Projects + Jira tasks",
     description:
-      "Run work on a shared board, sync with Jira Cloud, and keep assignees aligned in real time.",
+      "Browse your Jira projects, open a task board per project, and keep assignees aligned in real time.",
     gradient: "from-cyan-500/20 to-app-accent/10",
   },
 ] as const;
