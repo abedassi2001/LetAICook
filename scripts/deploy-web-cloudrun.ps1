@@ -36,10 +36,13 @@ Write-Host "Using gcloud: $Gcloud"
 & $Gcloud config set project $ProjectId
 & $Gcloud services enable run.googleapis.com artifactregistry.googleapis.com --quiet
 
+. (Join-Path $RepoRoot "scripts\lib\web-production-env.ps1")
+$buildArgs = Get-WebDockerBuildArgs $ProdEnv
+
 $Image = "${Region}-docker.pkg.dev/${ProjectId}/letaicook/${Service}:latest"
-Write-Host "Building $Image (from apps/web) ..."
+Write-Host "Building $Image (from apps/web) with Firebase build-args ..."
 Set-Location $WebDir
-docker build -f Dockerfile.prod -t $Image .
+docker build -f Dockerfile.prod @buildArgs -t $Image .
 
 & $Gcloud auth configure-docker "${Region}-docker.pkg.dev" --quiet
 docker push $Image

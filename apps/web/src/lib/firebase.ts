@@ -43,7 +43,7 @@ export function getFirebaseApp(): FirebaseApp {
   const config = readConfig();
   if (!config.apiKey || !config.projectId) {
     throw new Error(
-      "Missing Firebase web config. Copy apps/web/firebase.web.env.sample to .env.local and fill values.",
+      "Missing Firebase web config in this build. Locally: fill apps/web/.env.local and run prepare-hosting-deploy.ps1 before deploy-web-cloudrun.ps1. CI: set GitHub secrets FIREBASE_WEB_API_KEY, FIREBASE_AUTH_DOMAIN, FIREBASE_PROJECT_ID, FIREBASE_STORAGE_BUCKET, FIREBASE_MESSAGING_SENDER_ID, FIREBASE_APP_ID.",
     );
   }
   return initializeApp(config);

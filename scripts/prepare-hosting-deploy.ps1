@@ -90,10 +90,12 @@ Add-Content -Path $ProdEnv -Value ""
 
 Write-Host "Updated $ProdEnv"
 $check = Read-DotEnv $ProdEnv
-$missing = $firebaseKeys | Where-Object { $_ -ne "NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID" -and (-not $check[$_] -or $check[$_] -eq "") }
+. (Join-Path $RepoRoot "scripts\lib\web-production-env.ps1")
+$missing = Test-WebProductionEnv $check
 if ($missing.Count -gt 0) {
-    Write-Host "WARNING: Still empty in .env.production.local: $($missing -join ', ')" -ForegroundColor Yellow
-    Write-Host "Fill them from Firebase Console -> Project settings -> Your apps"
-} else {
-    Write-Host "Firebase + API URL look ready for hosting deploy."
+    Write-Host "ERROR: Missing in .env.production.local: $($missing -join ', ')" -ForegroundColor Red
+    Write-Host "Fill apps/web/.env.local from firebase.web.env.sample, then re-run this script."
+    Write-Host "Or copy values from Firebase Console -> Project settings -> Your apps"
+    exit 1
 }
+Write-Host "Firebase + API URL ready for production build."
