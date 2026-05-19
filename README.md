@@ -16,7 +16,7 @@ letAIcook helps a team **stay aligned from idea to delivery**:
 
 **Data today:** identities and tasks and designer workspaces live in **Firebase** (Auth + Firestore). **Server-side AI** uses **one Google Gemini API key** on **`apps/api`** (`GOOGLE_API_KEY` or `GEMINI_API_KEY`). Planning chat history is kept in the **browser** (`sessionStorage`) for handoff to the designer until a future Firestore-backed chat store is added.
 
-**Roadmap / product docs:** extra ideas and UML-style notes may live under `Plan/`; **implementation must match** `AI_PROJECT_INSTRUCTIONS.md`.
+**Architecture diagrams:** [`Plan/letAIcook_Architecture_UML.md`](./Plan/letAIcook_Architecture_UML.md) (Mermaid — deployment, data model, flows). Older `Plan/letAIcook_Use_Cases_and_UML.md` is not aligned with the current stack. **Implementation must match** `AI_PROJECT_INSTRUCTIONS.md`.
 
 ---
 
