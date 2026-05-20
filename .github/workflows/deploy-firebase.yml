@@ -73,7 +73,7 @@ jobs:
           WEB_URL=$(gcloud run services describe "$WEB_SERVICE" --region "$REGION" --format='value(status.url)' 2>/dev/null || true)
           CORS="http://localhost:3000"
           if [ -n "$WEB_URL" ]; then
-            CORS="${WEB_URL},${CORS}"
+            CORS="${WEB_URL},https://letaicook.web.app,https://letaicook.firebaseapp.com,${CORS}"
           fi
 
           gcloud run deploy "$SERVICE" \
@@ -84,11 +84,10 @@ jobs:
             --ingress all \
             --port 8080
 
-          # gcloud treats commas as key separators in --update-env-vars; escape commas in values.
-          CORS_GCLOUD="${CORS//,/\\,}"
+          # CORS_ORIGINS contains commas; use ^:^ delimiter (see gcloud topic escaping).
           gcloud run services update "$SERVICE" \
             --region "$REGION" \
-            --update-env-vars "GOOGLE_API_KEY=${GOOGLE_API_KEY},CORS_ORIGINS=${CORS_GCLOUD}"
+            --update-env-vars "^:^GOOGLE_API_KEY=${GOOGLE_API_KEY}^:^CORS_ORIGINS=${CORS}"
 
           URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
           echo "url=$URL" >> "$GITHUB_OUTPUT"
@@ -207,10 +206,9 @@ jobs:
           WEB_URL: ${{ steps.deploy-web.outputs.url }}
         run: |
           CORS="${WEB_URL},https://letaicook.web.app,https://letaicook.firebaseapp.com,http://localhost:3000"
-          CORS_GCLOUD="${CORS//,/\\,}"
           gcloud run services update "$API_SERVICE" \
             --region "$REGION" \
-            --update-env-vars "CORS_ORIGINS=${CORS_GCLOUD}"
+            --update-env-vars "^:^CORS_ORIGINS=${CORS}"
 
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
