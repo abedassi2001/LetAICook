@@ -69,6 +69,8 @@ copy deploy\cloudrun-env.sample.yaml deploy\cloudrun-env.yaml
 .\scripts\set-cloudrun-env.ps1
 ```
 
+GitHub Actions uses `scripts/ci-merge-cloudrun-env.py` for the same reason: it merges existing Cloud Run env (keeps Jira OAuth vars) and applies a quoted YAML file so `CORS_ORIGINS` URLs with commas and `https://` are not mangled by `gcloud --update-env-vars`.
+
 Note the **API URL** printed at the end (e.g. `https://letaicook-api-xxxxx-uc.a.run.app`).
 
 #### Jira Cloud OAuth (one shared app for all users)
