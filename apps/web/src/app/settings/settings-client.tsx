@@ -84,7 +84,9 @@ export function SettingsClient() {
         setProjects([]);
       }
     } catch (e) {
-      setConnection({ connected: false, oauth_available: false });
+      // Keep Connect enabled when the status request fails (network/CORS); only the API
+      // should set oauth_available=false when OAuth is genuinely not configured.
+      setConnection({ connected: false });
       setMessage({
         type: "error",
         text:

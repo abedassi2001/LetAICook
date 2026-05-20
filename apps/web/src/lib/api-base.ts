@@ -17,10 +17,29 @@
  *    `NEXT_PUBLIC_API_PORT` (default `8000`). Use when you open the app at
  *    `http://192.168.x.x:3000` so calls go to `http://192.168.x.x:8000` instead of
  *    `localhost` (SSR falls back to `http://localhost:8000` until the client runs).
- * 4. Default: `http://localhost:8000`.
+ * 4. Cloud Run web host (`letaicook-web-*.run.app`) → matching `letaicook-api-*.run.app`
+ *    when the build omitted `NEXT_PUBLIC_API_BASE_URL` (common on older images).
+ * 5. Default: `http://localhost:8000`.
  */
+function inferLetAiCookCloudRunApiBase(): string | null {
+  if (typeof window === "undefined" || !window.location?.hostname) return null;
+  const { protocol, hostname } = window.location;
+  if (!hostname.startsWith("letaicook-web") || !hostname.includes("run.app")) {
+    return null;
+  }
+  const apiHost = hostname.replace(/^letaicook-web/, "letaicook-api");
+  if (apiHost === hostname) return null;
+  return `${protocol}//${apiHost}`;
+}
+
 export function getPublicApiBaseUrl(): string {
   const explicit = process.env.NEXT_PUBLIC_API_BASE_URL?.trim().replace(/\/$/, "");
+  const isLocalDefault = !explicit || explicit === "http://localhost:8000";
+  if (!isLocalDefault && explicit) return explicit;
+
+  const inferred = inferLetAiCookCloudRunApiBase();
+  if (inferred) return inferred;
+
   if (explicit) return explicit;
 
   if (process.env.NEXT_PUBLIC_USE_SAME_ORIGIN_API_PROXY === "true") {

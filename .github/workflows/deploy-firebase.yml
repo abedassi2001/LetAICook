@@ -76,19 +76,17 @@ jobs:
             CORS="${WEB_URL},${CORS}"
           fi
 
-          {
-            echo "GOOGLE_API_KEY: \"${GOOGLE_API_KEY}\""
-            echo "CORS_ORIGINS: \"${CORS}\""
-          } > /tmp/cloudrun-env.yaml
-
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
             --region "$REGION" \
             --platform managed \
             --allow-unauthenticated \
             --ingress all \
-            --port 8080 \
-            --env-vars-file /tmp/cloudrun-env.yaml
+            --port 8080
+
+          gcloud run services update "$SERVICE" \
+            --region "$REGION" \
+            --update-env-vars "GOOGLE_API_KEY=${GOOGLE_API_KEY},CORS_ORIGINS=${CORS}"
 
           URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')
           echo "url=$URL" >> "$GITHUB_OUTPUT"
@@ -207,13 +205,10 @@ jobs:
           WEB_URL: ${{ steps.deploy-web.outputs.url }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: |
-          {
-            echo "GOOGLE_API_KEY: \"${GOOGLE_API_KEY}\""
-            echo "CORS_ORIGINS: \"${WEB_URL},http://localhost:3000\""
-          } > /tmp/cloudrun-env.yaml
+          CORS="${WEB_URL},https://letaicook.web.app,https://letaicook.firebaseapp.com,http://localhost:3000"
           gcloud run services update "$API_SERVICE" \
             --region "$REGION" \
-            --env-vars-file /tmp/cloudrun-env.yaml
+            --update-env-vars "CORS_ORIGINS=${CORS}"
 
       - name: Install Firebase CLI
         run: npm install -g firebase-tools

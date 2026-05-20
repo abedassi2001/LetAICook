@@ -38,4 +38,15 @@ describe("getPublicApiBaseUrl", () => {
   it("defaults to localhost:8000", () => {
     expect(getPublicApiBaseUrl()).toBe("http://localhost:8000");
   });
+
+  it("infers letaicook-api Cloud Run host from letaicook-web host", () => {
+    vi.stubGlobal("window", {
+      location: {
+        protocol: "https:",
+        hostname: "letaicook-web-6dyzc2mqrq-uc.a.run.app",
+        origin: "https://letaicook-web-6dyzc2mqrq-uc.a.run.app",
+      },
+    });
+    expect(getPublicApiBaseUrl()).toBe("https://letaicook-api-6dyzc2mqrq-uc.a.run.app");
+  });
 });
