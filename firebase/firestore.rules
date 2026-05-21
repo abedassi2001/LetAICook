@@ -37,6 +37,17 @@ service cloud.firestore {
       allow read, write: if signedIn() && request.auth.uid == uid;
     }
 
+    // Project roster: `projects/{projectId}/members/{memberId}` — see project-member-model.ts
+    match /projects/{projectId}/members/{memberId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && isAdmin()
+        && request.resource.data.addedByUid == request.auth.uid
+        && request.resource.data.emailLower is string
+        && request.resource.data.displayName is string;
+      allow update: if signedIn() && isAdmin();
+      allow delete: if signedIn() && isAdmin();
+    }
+
     // Tasks: `projects/{projectId}/tasks/{taskId}` — see task-model.ts
     match /projects/{projectId}/tasks/{taskId} {
       allow read: if signedIn()

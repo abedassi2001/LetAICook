@@ -20,6 +20,7 @@ import {
   jiraPriorityToTaskPriority,
   jiraStatusToTaskStatus,
 } from "@/lib/jira-status-map";
+import { subscribeProjectMembers } from "@/lib/project-members";
 import { USERS_COLLECTION, type UserProfileDoc } from "@/lib/user-model";
 import {
   useCallback,
@@ -249,29 +250,69 @@ export function TasksBoard({
   }, [loadJiraLiveIssues]);
 
   useEffect(() => {
-    if (!isAdmin || !profile?.teamId) return;
-    const q = query(
-      collection(getFirestoreDb(), USERS_COLLECTION),
-      where("role", "==", "worker"),
-      where("teamId", "==", profile.teamId)
-    );
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setWorkers(
-          snap.docs.map((d) => {
+    if (!isAdmin) return;
+
+    const mergeWorkers = (teamWorkers: WorkerOption[], rosterUids: WorkerOption[]) => {
+      const seen = new Set<string>();
+      const merged: WorkerOption[] = [];
+      for (const w of [...rosterUids, ...teamWorkers]) {
+        if (!w.uid || seen.has(w.uid)) continue;
+        seen.add(w.uid);
+        merged.push(w);
+      }
+      merged.sort((a, b) => a.label.localeCompare(b.label));
+      setWorkers(merged);
+    };
+
+    let teamWorkers: WorkerOption[] = [];
+    let rosterWorkers: WorkerOption[] = [];
+
+    const apply = () => mergeWorkers(teamWorkers, rosterWorkers);
+
+    let unsubTeam: (() => void) | undefined;
+    if (profile?.teamId) {
+      const q = query(
+        collection(getFirestoreDb(), USERS_COLLECTION),
+        where("role", "==", "worker"),
+        where("teamId", "==", profile.teamId),
+      );
+      unsubTeam = onSnapshot(
+        q,
+        (snap) => {
+          teamWorkers = snap.docs.map((d) => {
             const u = d.data() as UserProfileDoc;
             return {
               uid: d.id,
               label: `${u.displayName} (${u.emailLower})`,
             };
-          }),
-        );
+          });
+          apply();
+        },
+        (e) => setError(e.message),
+      );
+    }
+
+    const unsubRoster = subscribeProjectMembers(
+      projectKey,
+      (items) => {
+        rosterWorkers = items
+          .filter((m) => m.data.uid)
+          .map((m) => ({
+            uid: m.data.uid as string,
+            label: `${m.data.displayName} (${m.data.emailLower}) · project`,
+          }));
+        apply();
       },
-      (e) => setError(e.message),
+      () => {
+        /* roster errors surface in sidebar */
+      },
     );
-    return () => unsub();
-  }, [isAdmin, profile?.teamId]);
+
+    return () => {
+      unsubTeam?.();
+      unsubRoster();
+    };
+  }, [isAdmin, profile?.teamId, projectKey]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
