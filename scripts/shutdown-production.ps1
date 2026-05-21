@@ -1,4 +1,4 @@
-# Take letAIcook production offline (Firebase Hosting + Cloud Run API).
+# Take letAIcook production offline (disable Hosting + lock down Cloud Run API).
 # Usage: .\scripts\shutdown-production.ps1 -ProjectId letaicook
 
 param(
@@ -38,7 +38,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "Production is offline."
-Write-Host "  https://${ProjectId}.web.app will not serve the app until you redeploy."
+Write-Host "  https://${ProjectId}.web.app (if still enabled) will not serve the app."
+Write-Host "  Redeploy web: .\scripts\deploy-web-cloudrun.ps1"
 Write-Host "  Cloud Run API is internal-only (not reachable from the public internet)."
 Write-Host ""
 Write-Host "To bring it back after fixes:"

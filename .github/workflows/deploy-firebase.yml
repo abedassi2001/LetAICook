@@ -73,7 +73,7 @@ jobs:
           WEB_URL=$(gcloud run services describe "$WEB_SERVICE" --region "$REGION" --format='value(status.url)' 2>/dev/null || true)
           CORS="http://localhost:3000"
           if [ -n "$WEB_URL" ]; then
-            CORS="${WEB_URL},https://letaicook.web.app,https://letaicook.firebaseapp.com,${CORS}"
+            CORS="${WEB_URL},${CORS}"
           fi
 
           gcloud run deploy "$SERVICE" \
@@ -204,7 +204,7 @@ jobs:
           API_SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'letaicook-api' }}
           WEB_URL: ${{ steps.deploy-web.outputs.url }}
         run: |
-          export CORS_ORIGINS="${WEB_URL},https://letaicook.web.app,https://letaicook.firebaseapp.com,http://localhost:3000"
+          export CORS_ORIGINS="${WEB_URL},http://localhost:3000"
           python3 scripts/ci-merge-cloudrun-env.py "$API_SERVICE" "$REGION" "${{ secrets.GCP_PROJECT_ID }}"
 
       - name: Install Firebase CLI

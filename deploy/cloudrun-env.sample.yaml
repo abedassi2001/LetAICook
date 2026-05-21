@@ -5,12 +5,12 @@
 # Or: gcloud run services update letaicook-api --region us-central1 --env-vars-file deploy/cloudrun-env.yaml
 
 GOOGLE_API_KEY: "YOUR_GEMINI_API_KEY"
-# Include your Cloud Run web URL (from deploy-web-cloudrun.ps1) and Firebase Hosting origins:
-CORS_ORIGINS: "https://letaicook.web.app,https://letaicook.firebaseapp.com,https://letaicook-web-XXXXX-uc.a.run.app,http://localhost:3000"
+# Cloud Run web URL only (from deploy-web-cloudrun.ps1 or CI). Do not use letaicook.web.app for the UI.
+CORS_ORIGINS: "https://letaicook-web-XXXXX-uc.a.run.app,http://localhost:3000"
 FIREBASE_PROJECT_ID: "letaicook"
 
 # Jira OAuth 2.0 (3LO) — server/admin only; end users never configure these.
 ATLASSIAN_CLIENT_ID: "YOUR_ATLASSIAN_OAUTH_CLIENT_ID"
 ATLASSIAN_CLIENT_SECRET: "YOUR_ATLASSIAN_OAUTH_CLIENT_SECRET"
 ATLASSIAN_REDIRECT_URI: "https://YOUR-CLOUD-RUN-URL/jira/oauth/callback"
-FRONTEND_BASE_URL: "https://letaicook.web.app"
+FRONTEND_BASE_URL: "https://letaicook-web-XXXXX-uc.a.run.app"

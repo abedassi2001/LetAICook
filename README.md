@@ -37,7 +37,7 @@ letAIcook helps a team **stay aligned from idea to delivery**:
 | `apps/web` | Next.js (App Router, TypeScript, Tailwind). Routes: `/login`, `/chat`, `/system-designer`, `/tasks`. |
 | `apps/api` | FastAPI (`uvicorn main:app`). Source package `letaicook_api/` — `routers/` (health, chat, design, Jira), `services/` (Gemini). Same HTTP routes as before. |
 | `firebase/` | `firestore.rules`, `firebase.json` — deploy with Firebase CLI. |
-| `deploy/` | Production deploy guide (Firebase Hosting + Cloud Run). See [`deploy/README.md`](./deploy/README.md). |
+| `deploy/` | Production deploy guide (Cloud Run + Firebase Auth/Firestore). See [`deploy/README.md`](./deploy/README.md). |
 | `scripts/` | Optional local tools (e.g. evening Firestore task reminder for Windows). |
 | `Plan/` | Optional roadmap / domain notes (non-canonical vs `AI_PROJECT_INSTRUCTIONS.md`). |
 
@@ -93,10 +93,10 @@ Compose loads `apps/web/.env.local` and `apps/api/.env.local` when present (`req
 
 ## Production deploy (shareable link)
 
-Deploy so teammates and customers can open **`https://<your-project-id>.web.app`**:
+Deploy so teammates and customers can open your **Cloud Run web** URL (see `deploy/README.md`):
 
 1. **API** → Google Cloud Run (Gemini + Jira): `.\scripts\deploy-api-cloudrun.ps1`
-2. **Web + Firestore rules** → Firebase: `.\scripts\deploy-hosting.ps1`
+2. **Web** → Cloud Run: `.\scripts\deploy-web-cloudrun.ps1` · **Firestore rules**: `.\scripts\deploy-firestore-rules.ps1`
 
 Full steps, GitHub Actions CI, and secrets: **[`deploy/README.md`](./deploy/README.md)**.
 

@@ -1,4 +1,4 @@
-# Prepare apps/web/.env.production.local for Firebase Hosting deploy.
+# Prepare apps/web/.env.production.local for Cloud Run web deploy (legacy name: hosting).
 # Fetches Cloud Run URL and merges Firebase vars from apps/web/.env.local when possible.
 
 param(

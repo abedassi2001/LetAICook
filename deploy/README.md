@@ -84,7 +84,7 @@ End users only click **Connect Jira** in Settings. They never enter `ATLASSIAN_C
 | `ATLASSIAN_CLIENT_ID` | From [Atlassian Developer Console](https://developer.atlassian.com/console/myapps/) | OAuth 2.0 (3LO) client id |
 | `ATLASSIAN_CLIENT_SECRET` | Same app | Server-only; never in the web app |
 | `ATLASSIAN_REDIRECT_URI` | `https://YOUR-API-URL/jira/oauth/callback` | Must match Console callback **exactly** |
-| `FRONTEND_BASE_URL` | `https://letaicook.web.app` | Where users return after OAuth |
+| `FRONTEND_BASE_URL` | `https://letaicook-web-…-uc.a.run.app` | Cloud Run web URL (OAuth return) |
 | `FIREBASE_PROJECT_ID` | `letaicook` | Verify Firebase ID tokens on API |
 
 **Atlassian Console:** Authorization → OAuth 2.0 (3LO) → callback URL above; scopes `read:jira-work`, `write:jira-work`, `read:jira-user`, `offline_access`. For users outside your org, enable **distribution** (test users in dev; publish/allowlist in production).
@@ -93,7 +93,7 @@ Refresh tokens stay **server-side only** (see `JIRA_OAUTH_DATA_DIR` in `apps/api
 
 ### Step B — Configure web env for production
 
-Copy [`apps/web/production.env.sample`](../apps/web/production.env.sample) → `apps/web/.env.production.local` (gitignored) **or** set in Firebase Hosting build config:
+Copy [`apps/web/production.env.sample`](../apps/web/production.env.sample) → `apps/web/.env.production.local` (gitignored). Used by `deploy-web-cloudrun.ps1` / CI:
 
 ```env
 NEXT_PUBLIC_FIREBASE_API_KEY=...
@@ -107,20 +107,22 @@ NEXT_PUBLIC_API_BASE_URL=https://YOUR-CLOUD-RUN-URL
 
 Do **not** set `NEXT_PUBLIC_USE_FIREBASE_EMULATOR` in production.
 
-### Step C — Deploy Firestore rules + Hosting
+### Step C — Deploy web to Cloud Run + Firestore rules
 
 ```powershell
-.\scripts\deploy-hosting.ps1 -ProjectId letaicook
+.\scripts\deploy-web-cloudrun.ps1 -ProjectId letaicook
+.\scripts\deploy-firestore-rules.ps1 -ProjectId letaicook
 ```
 
-This runs `prepare-hosting-deploy.ps1` (Cloud Run URL + Firebase vars from `.env.local`) then `firebase deploy`.
+Production URL is your **Cloud Run web** service (e.g. `https://letaicook-web-xxxxx-uc.a.run.app`). Share that link with customers/teammates.
 
-Your app is live at:
+**Firebase Hosting** (`https://letaicook.web.app`) is retired. To stop the old site:
 
-- **https://letaicook.web.app**
-- **https://letaicook.firebaseapp.com**
+```powershell
+.\scripts\disable-firebase-hosting.ps1 -ProjectId letaicook
+```
 
-Share either link with customers/teammates.
+Remove `letaicook.web.app` from Firebase Auth **Authorized domains** if you no longer need it (keep the Cloud Run hostname).
 
 ---
 

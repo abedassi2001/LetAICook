@@ -1,4 +1,4 @@
-# Full production redeploy: API env + Cloud Run + web hosting.
+# Full production redeploy: API env + Cloud Run API (web: deploy-web-cloudrun.ps1).
 # Usage: .\scripts\redeploy-production.ps1 -ProjectId letaicook
 
 param(
@@ -38,16 +38,21 @@ Write-Host "Restoring public API access (ingress=all) ..."
     --quiet
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host ""
-Write-Host "Setting API CORS for web.app + local dev ..."
-& $Gcloud run services update letaicook-api `
-    --project $ProjectId `
-    --region $Region `
-    --set-env-vars "CORS_ORIGINS=https://letaicook.web.app\,https://letaicook.firebaseapp.com\,http://localhost:3000"
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$WebUrl = & $Gcloud run services describe letaicook-web --project $ProjectId --region $Region --format="value(status.url)" 2>$null
+if ($WebUrl) {
+    Write-Host ""
+    Write-Host "Setting API CORS for Cloud Run web + local dev ..."
+    $env:CORS_ORIGINS = "$WebUrl,http://localhost:3000"
+    python (Join-Path $RepoRoot "scripts\ci-merge-cloudrun-env.py") letaicook-api $Region $ProjectId
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
 $ApiUrl = & $Gcloud run services describe letaicook-api --project $ProjectId --region $Region --format="value(status.url)"
 Write-Host ""
 Write-Host "API redeployed: $ApiUrl"
-Write-Host "Web app URL (if using Firebase Hosting): https://${ProjectId}.web.app"
-Write-Host "Optional: .\scripts\deploy-web-cloudrun.ps1  OR  .\scripts\deploy-hosting.ps1  to publish frontend changes."
+if ($WebUrl) {
+    Write-Host "Web app (production): $WebUrl"
+} else {
+    Write-Host "Web: run .\scripts\deploy-web-cloudrun.ps1"
+}
+Write-Host "Firestore rules: .\scripts\deploy-firestore-rules.ps1"
