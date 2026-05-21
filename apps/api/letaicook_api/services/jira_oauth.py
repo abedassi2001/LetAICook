@@ -38,6 +38,7 @@ _PLACEHOLDER_CLIENT_IDS = frozenset({"your_client_id", "your-client-id"})
 CODE_NOT_CONFIGURED = "jira_oauth_not_configured"
 CODE_MISCONFIGURED = "jira_oauth_misconfigured"
 CODE_NO_SITES = "jira_no_sites"
+CODE_DISTRIBUTION = "jira_oauth_distribution"
 
 USER_MESSAGES: dict[str, str] = {
     CODE_NOT_CONFIGURED: (
@@ -52,6 +53,11 @@ USER_MESSAGES: dict[str, str] = {
         "Your Atlassian account does not have access to any Jira Cloud site. "
         "Create a Jira site or ask an admin to invite you, then try again."
     ),
+    CODE_DISTRIBUTION: (
+        "This Jira app is still in development on Atlassian. Only the app owner can connect "
+        "until distribution is enabled. Ask your letAIcook administrator to add your Atlassian "
+        "account as a test user or publish the app in the Atlassian Developer Console."
+    ),
 }
 
 ADMIN_MESSAGES: dict[str, str] = {
@@ -64,6 +70,11 @@ ADMIN_MESSAGES: dict[str, str] = {
         "Atlassian Developer Console → OAuth 2.0 (3LO)."
     ),
     CODE_NO_SITES: "accessible-resources returned no Jira Cloud sites for this Atlassian account.",
+    CODE_DISTRIBUTION: (
+        "Atlassian Developer Console → your OAuth 2.0 app → Distribution: enable distribution "
+        "and add each teammate's Atlassian account email as a test user (or publish the app). "
+        "See deploy/JIRA_OAUTH_DISTRIBUTION.md."
+    ),
 }
 
 
@@ -73,6 +84,13 @@ def map_atlassian_authorize_error(
 ) -> str:
     """Map Atlassian authorize-step error to a settings callback reason code."""
     combined = f"{error or ''} {error_description or ''}".lower()
+    if (
+        "in development" in combined
+        or "only the owner" in combined
+        or "don't have access to this app" in combined
+        or "do not have access to this app" in combined
+    ):
+        return CODE_DISTRIBUTION
     if "jira site" in combined or (
         "jira" in combined and ("don't have" in combined or "do not have" in combined)
     ):

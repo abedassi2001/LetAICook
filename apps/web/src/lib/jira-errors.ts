@@ -6,7 +6,7 @@ const CALLBACK_MESSAGES: Record<string, string> = {
   jira_oauth_misconfigured:
     "Jira integration is not configured by this deployment. Please ask your administrator to complete the server setup.",
   jira_oauth_distribution:
-    "This app is not yet approved for your Atlassian account. Ask the letAIcook administrator to enable access for external users in the Atlassian Developer Console.",
+    "Atlassian blocked this connection because the Jira app is still in development (only the app owner can connect). Ask your administrator to open the Atlassian Developer Console, enable Distribution, and add your Atlassian account email as a test user — then try Connect Jira again.",
   jira_no_sites:
     "Your Atlassian account does not have access to any Jira Cloud site. Create a Jira site or ask an admin to invite you, then try again.",
   jira_oauth_denied: "Jira connection was cancelled.",

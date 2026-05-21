@@ -360,10 +360,30 @@ export function SettingsClient() {
       {activeTab === "jira" && (
         <div className="rounded-xl border border-app-border bg-app-elevated p-6">
           <h2 className="mb-2 text-lg font-semibold text-app-text">Jira Cloud</h2>
-          <p className="mb-6 text-sm text-app-muted">
+          <p className="mb-4 text-sm text-app-muted">
             Click Connect Jira to sign in with Atlassian. You do not need an API token or developer
             setup — your deployment administrator configures that once for everyone.
           </p>
+          <details className="mb-6 rounded-lg border border-app-border/80 bg-app-bg/40 px-3 py-2 text-sm">
+            <summary className="cursor-pointer text-app-muted hover:text-app-text">
+              Atlassian says “You don&apos;t have access to this app”?
+            </summary>
+            <p className="mt-2 text-app-muted">
+              The Jira OAuth app is in <strong className="text-app-text">development</strong> on
+              Atlassian — only the app owner can connect until distribution is enabled.
+            </p>
+            <p className="mt-2 text-app-muted">
+              <strong className="text-app-text">Teammates:</strong> ask your admin to add your
+              Atlassian login email as a test user in the Developer Console, then try again.
+            </p>
+            {profile?.role === "admin" ? (
+              <p className="mt-2 text-app-muted">
+                <strong className="text-app-text">Admins:</strong> see{" "}
+                <code className="rounded bg-app-bg px-1 text-xs">deploy/JIRA_OAUTH_DISTRIBUTION.md</code>{" "}
+                in the repo — enable Distribution and add each user&apos;s Atlassian account email.
+              </p>
+            ) : null}
+          </details>
 
           {!loadingConn && !oauthAvailable && setupMessage ? (
             <p className="mb-4 rounded-lg border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-sm text-amber-100">

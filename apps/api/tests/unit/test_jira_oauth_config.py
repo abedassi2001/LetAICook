@@ -45,6 +45,14 @@ def test_map_atlassian_authorize_error_no_jira_site():
     assert reason == jira_oauth.CODE_NO_SITES
 
 
+def test_map_atlassian_authorize_error_development_distribution():
+    reason = jira_oauth.map_atlassian_authorize_error(
+        "access_denied",
+        "This application is in development - only the owner of this application may grant it access",
+    )
+    assert reason == jira_oauth.CODE_DISTRIBUTION
+
+
 def test_apply_tokens_raises_when_no_accessible_sites(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ATLASSIAN_CLIENT_ID", "abc123RealClientIdFromConsole")
     monkeypatch.setenv("ATLASSIAN_CLIENT_SECRET", "secret-value")
