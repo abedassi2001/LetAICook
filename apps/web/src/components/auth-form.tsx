@@ -139,6 +139,11 @@ export function AuthForm() {
             required
             autoComplete="email"
           />
+          {authMode === "signup" ? (
+            <span className="text-xs text-app-muted">
+              Use an address your team lead added on a project, or a work email your team already registered.
+            </span>
+          ) : null}
         </label>
         <label className="flex flex-col gap-1.5 text-sm">
           <span className="text-app-muted">Password</span>

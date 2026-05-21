@@ -9,6 +9,7 @@ import {
   type JiraProjectTeammate,
 } from "@/lib/jira-client";
 import type { ProjectMemberDoc } from "@/lib/project-member-model";
+import { syncAuthAllowlistEntries } from "@/lib/auth-allowlist";
 import {
   addProjectMemberByEmail,
   removeProjectMember,
@@ -238,6 +239,14 @@ export function ProjectTeamSidebar({
     );
     return unsub;
   }, [projectKey, user]);
+
+  useEffect(() => {
+    if (!isAdmin || roster.length === 0) return;
+    void syncAuthAllowlistEntries(
+      roster.map((r) => r.data.emailLower),
+      "project_member",
+    );
+  }, [isAdmin, roster]);
 
   async function handleAddMember(e: React.FormEvent) {
     e.preventDefault();

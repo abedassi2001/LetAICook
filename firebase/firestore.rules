@@ -15,6 +15,21 @@ service cloud.firestore {
         && userData().role == 'admin';
     }
 
+    // Pre-auth email allowlist: `authAllowlist/{id}` — see auth-allowlist.ts
+    match /authAllowlist/{id} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if signedIn() && (
+        isAdmin()
+        || (
+          request.resource.data.emailLower is string
+          && request.auth.token.email != null
+          && request.auth.token.email == request.resource.data.emailLower
+        )
+      );
+      allow delete: if signedIn() && isAdmin();
+    }
+
     // Profiles: `users/{uid}` — see apps/web/src/lib/user-model.ts
     match /users/{uid} {
       allow read: if signedIn()

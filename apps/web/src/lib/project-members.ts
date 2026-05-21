@@ -1,3 +1,9 @@
+import { ensureAuthAllowlistEntry } from "@/lib/auth-allowlist";
+import {
+  isValidEmailFormat,
+  memberDocIdFromEmail,
+  normalizeEmail,
+} from "@/lib/email-utils";
 import { getFirestoreDb } from "@/lib/firebase";
 import {
   PROJECT_MEMBERS_COLLECTION,
@@ -18,21 +24,15 @@ import {
   where,
 } from "firebase/firestore";
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 export function normalizeMemberEmail(email: string): string {
-  return email.trim().toLowerCase();
+  return normalizeEmail(email);
 }
 
 export function isValidMemberEmail(email: string): boolean {
-  return EMAIL_RE.test(normalizeMemberEmail(email));
+  return isValidEmailFormat(email);
 }
 
-/** Safe Firestore document id derived from email. */
-export function memberDocIdFromEmail(email: string): string {
-  const lower = normalizeMemberEmail(email);
-  return lower.replace(/@/g, "_at_").replace(/\./g, "_");
-}
+export { memberDocIdFromEmail };
 
 export function projectMembersCollection(projectKey: string) {
   return collection(
@@ -93,6 +93,8 @@ export async function addProjectMemberByEmail(
     addedAt: now,
     updatedAt: now,
   });
+
+  await ensureAuthAllowlistEntry(emailLower, "project_member");
 
   return { memberId, linked: Boolean(linked) };
 }

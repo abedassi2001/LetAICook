@@ -120,6 +120,7 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 | 2026-05-14 | **Web → API routing:** `apps/web/src/lib/api-base.ts` documents cloud Firebase vs emulators; adds optional `NEXT_PUBLIC_USE_SAME_ORIGIN_API_PROXY` + `LETAICOOK_API_PROXY_TARGET` (Next rewrite `/__letaicook_api`) and `NEXT_PUBLIC_API_FOLLOW_WEB_HOST` for LAN/same-host API. README + `firebase.web.env.sample` updated. |
 | 2026-05-16 | **Jira integration:** Per-user Jira Cloud credentials in `users/{uid}` (Settings). FastAPI `/jira/*` proxy: create, update, delete, transition, batch, sync-status. Web `jira-client.ts`; `/tasks` syncs Firestore tasks with Jira when linked (`jiraIssueKey`). Optional server env in `api.env.sample`. |
 | 2026-05-19 | **Architecture UML:** `Plan/letAIcook_Architecture_UML.md` — Mermaid diagrams for deployment, Firestore model, auth, planning, designer, tasks, Jira, and API routes (matches current Firebase + FastAPI + Gemini stack). |
+| 2026-05-19 | **Auth email policy:** Sign-in/sign-up only for emails on `authAllowlist` (synced from project roster + user profiles) or existing `users/{uid}` profiles; blocks disposable domains and invalid formats. Deploy **`firebase/firestore.rules`**. Admins opening a project board backfill roster emails into the allowlist. |
 
 *(Append a one-line note here whenever this file or Firebase setup changes materially.)*
 
