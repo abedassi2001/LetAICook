@@ -70,6 +70,38 @@ export type JiraIssueListItem = {
   status_category: string;
   priority: string | null;
   url: string;
+  assignee?: string | null;
+  assignee_account_id?: string | null;
+};
+
+export type JiraTeammateIssue = {
+  issue_key: string;
+  summary: string;
+  status: string;
+  status_category: string;
+  priority: string | null;
+  url: string;
+};
+
+export type JiraProjectTeammate = {
+  account_id: string | null;
+  display_name: string;
+  email: string | null;
+  avatar_url: string | null;
+  active_count: number;
+  in_progress_count: number;
+  done_count: number;
+  total_assigned: number;
+  recent_issues: JiraTeammateIssue[];
+};
+
+export type JiraProjectTeam = {
+  project_key: string;
+  project_name: string | null;
+  project_lead: string | null;
+  site_url: string | null;
+  teammates: JiraProjectTeammate[];
+  unassigned_count: number;
 };
 
 export function jiraCredentialsFromProfile(
@@ -280,6 +312,23 @@ export async function listJiraProjectIssues(
   return jiraRequest<JiraIssueListItem[]>(
     auth,
     `/jira/projects/${encodeURIComponent(projectKey)}/issues?${params}`,
+    undefined,
+    manualCreds,
+  );
+}
+
+export async function fetchJiraProjectTeam(
+  auth: JiraClientAuth,
+  projectKey: string,
+  maxResults = 100,
+  manualCreds?: JiraCredentials | null,
+): Promise<JiraProjectTeam> {
+  const params = new URLSearchParams({
+    max_results: String(maxResults),
+  });
+  return jiraRequest<JiraProjectTeam>(
+    auth,
+    `/jira/projects/${encodeURIComponent(projectKey)}/team?${params}`,
     undefined,
     manualCreds,
   );

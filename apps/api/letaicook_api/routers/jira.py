@@ -152,6 +152,38 @@ class JiraIssueListItem(BaseModel):
     status_category: str
     priority: str | None = None
     url: str
+    assignee: str | None = None
+    assignee_account_id: str | None = None
+
+
+class JiraTeammateIssue(BaseModel):
+    issue_key: str
+    summary: str
+    status: str
+    status_category: str
+    priority: str | None = None
+    url: str
+
+
+class JiraProjectTeammate(BaseModel):
+    account_id: str | None = None
+    display_name: str
+    email: str | None = None
+    avatar_url: str | None = None
+    active_count: int = 0
+    in_progress_count: int = 0
+    done_count: int = 0
+    total_assigned: int = 0
+    recent_issues: list[JiraTeammateIssue] = Field(default_factory=list)
+
+
+class JiraProjectTeam(BaseModel):
+    project_key: str
+    project_name: str | None = None
+    project_lead: str | None = None
+    site_url: str | None = None
+    teammates: list[JiraProjectTeammate] = Field(default_factory=list)
+    unassigned_count: int = 0
 
 
 class JiraConnectionPublic(BaseModel):
@@ -245,10 +277,13 @@ def _search_jira_issues(
     session: JiraSession,
     jql: str,
     max_results: int,
+    *,
+    fields: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Search issues via Jira Cloud JQL API (new search/jql, with legacy fallback)."""
     limit = min(max(max_results, 1), 100)
-    fields_csv = "summary,status,priority"
+    field_list = fields or ["summary", "status", "priority"]
+    fields_csv = ",".join(field_list)
 
     resp = session.get(
         "/rest/api/3/search/jql",
@@ -267,7 +302,7 @@ def _search_jira_issues(
             json={
                 "jql": jql,
                 "maxResults": limit,
-                "fields": ["summary", "status", "priority"],
+                "fields": field_list,
             },
         )
         if resp.status_code == 200:
@@ -290,6 +325,23 @@ def _search_jira_issues(
     )
 
 
+def _issue_to_teammate_item(
+    session: JiraSession, item: dict[str, Any]
+) -> JiraTeammateIssue:
+    key = item.get("key", "")
+    fields = item.get("fields", {})
+    status_obj = fields.get("status") or {}
+    priority_obj = fields.get("priority")
+    return JiraTeammateIssue(
+        issue_key=key,
+        summary=fields.get("summary") or key,
+        status=status_obj.get("name", "Unknown"),
+        status_category=status_obj.get("statusCategory", {}).get("name", "Unknown"),
+        priority=priority_obj.get("name") if priority_obj else None,
+        url=session.issue_browse_url(key),
+    )
+
+
 def _issues_to_list_items(
     session: JiraSession, issues: list[dict[str, Any]]
 ) -> list[JiraIssueListItem]:
@@ -299,6 +351,7 @@ def _issues_to_list_items(
         fields = item.get("fields", {})
         status_obj = fields.get("status") or {}
         priority_obj = fields.get("priority")
+        assignee_obj = fields.get("assignee")
         results.append(
             JiraIssueListItem(
                 issue_key=key,
@@ -309,9 +362,121 @@ def _issues_to_list_items(
                 ),
                 priority=priority_obj.get("name") if priority_obj else None,
                 url=session.issue_browse_url(key),
+                assignee=assignee_obj.get("displayName") if assignee_obj else None,
+                assignee_account_id=assignee_obj.get("accountId") if assignee_obj else None,
             )
         )
     return results
+
+
+def _fetch_assignable_users(
+    session: JiraSession, project_key: str, max_results: int = 50
+) -> list[dict[str, Any]]:
+    resp = session.get(
+        "/rest/api/3/user/assignable/search",
+        params={"project": project_key, "maxResults": min(max_results, 50)},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        return []
+    data = resp.json()
+    if isinstance(data, list):
+        return data
+    return list(data.get("values") or data.get("users") or [])
+
+
+def _fetch_project_meta(session: JiraSession, project_key: str) -> dict[str, Any]:
+    resp = session.get(f"/rest/api/3/project/{project_key}", timeout=10)
+    if resp.status_code != 200:
+        return {}
+    return resp.json()
+
+
+def _build_project_team(
+    session: JiraSession, project_key: str, max_issues: int = 100
+) -> JiraProjectTeam:
+    meta = _fetch_project_meta(session, project_key)
+    lead = meta.get("lead") or {}
+    project_name = meta.get("name")
+    project_lead = lead.get("displayName") if isinstance(lead, dict) else None
+
+    assignable = _fetch_assignable_users(session, project_key)
+    members: dict[str, JiraProjectTeammate] = {}
+
+    for user in assignable:
+        account_id = user.get("accountId") or user.get("account_id")
+        key = account_id or user.get("emailAddress") or user.get("displayName") or ""
+        if not key:
+            continue
+        avatars = user.get("avatarUrls") or {}
+        avatar_url = avatars.get("48x48") or avatars.get("32x32")
+        members[key] = JiraProjectTeammate(
+            account_id=account_id,
+            display_name=user.get("displayName") or user.get("name") or "Unknown",
+            email=user.get("emailAddress"),
+            avatar_url=avatar_url,
+        )
+
+    jql = f'project = "{project_key}" ORDER BY updated DESC'
+    issues = _search_jira_issues(
+        session,
+        jql,
+        max_issues,
+        fields=["summary", "status", "priority", "assignee"],
+    )
+    unassigned = 0
+
+    for raw in issues:
+        fields = raw.get("fields", {})
+        assignee_obj = fields.get("assignee")
+        teammate_issue = _issue_to_teammate_item(session, raw)
+        category = (teammate_issue.status_category or "").lower()
+        is_done = category == "done" or teammate_issue.status.lower() in ("done", "closed", "resolved")
+        in_progress = not is_done and (
+            category == "in progress"
+            or "progress" in teammate_issue.status.lower()
+            or teammate_issue.status.lower() in ("in review", "review")
+        )
+
+        if not assignee_obj:
+            unassigned += 1
+            continue
+
+        account_id = assignee_obj.get("accountId")
+        member_key = account_id or assignee_obj.get("emailAddress") or assignee_obj.get("displayName")
+        if member_key not in members:
+            avatars = assignee_obj.get("avatarUrls") or {}
+            members[member_key] = JiraProjectTeammate(
+                account_id=account_id,
+                display_name=assignee_obj.get("displayName") or "Unknown",
+                email=assignee_obj.get("emailAddress"),
+                avatar_url=avatars.get("48x48") or avatars.get("32x32"),
+            )
+
+        member = members[member_key]
+        member.total_assigned += 1
+        if is_done:
+            member.done_count += 1
+        else:
+            member.active_count += 1
+            if in_progress:
+                member.in_progress_count += 1
+            if len(member.recent_issues) < 5 and not is_done:
+                member.recent_issues.append(teammate_issue)
+
+    teammates = sorted(
+        members.values(),
+        key=lambda m: (-m.active_count, -m.total_assigned, m.display_name.lower()),
+    )
+
+    return JiraProjectTeam(
+        project_key=project_key,
+        project_name=project_name,
+        project_lead=project_lead,
+        site_url=session.browse_base,
+        teammates=teammates,
+        unassigned_count=unassigned,
+    )
 
 
 def _perform_transition(
@@ -564,6 +729,16 @@ def list_jira_project_issues(
     jql = f'project = "{project_key}" ORDER BY updated DESC'
     issues = _search_jira_issues(session, jql, max_results)
     return _issues_to_list_items(session, issues)
+
+
+@router.get("/projects/{project_key}/team", response_model=JiraProjectTeam)
+def list_jira_project_team(
+    project_key: str,
+    max_results: int = 100,
+    session: JiraSession = Depends(resolve_jira_session),
+) -> JiraProjectTeam:
+    """Teammates on a Jira project with workload from live issues (no Jira UI login)."""
+    return _build_project_team(session, project_key, max_results)
 
 
 @router.post("/issues", response_model=CreateJiraIssueResponse)

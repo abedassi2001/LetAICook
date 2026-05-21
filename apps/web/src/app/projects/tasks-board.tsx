@@ -66,9 +66,15 @@ type WorkerOption = { uid: string; label: string };
 type TasksBoardProps = {
   projectKey: string;
   projectName?: string;
+  /** Highlight task row linked to this Jira issue (from team sidebar). */
+  highlightJiraIssueKey?: string | null;
 };
 
-export function TasksBoard({ projectKey, projectName }: TasksBoardProps) {
+export function TasksBoard({
+  projectKey,
+  projectName,
+  highlightJiraIssueKey,
+}: TasksBoardProps) {
   const { user, profile, loading: authLoading, error: authCtxError, signOutUser } =
     useAuth();
 
@@ -775,10 +781,18 @@ export function TasksBoard({ projectKey, projectName }: TasksBoardProps) {
             : `${items.length} task(s)${isAdmin ? "" : " assigned to you"}`}
         </h2>
         <ul className="mt-3 space-y-3">
-          {items.map(({ id, data }) => (
+          {items.map(({ id, data }) => {
+            const highlighted =
+              Boolean(highlightJiraIssueKey) &&
+              data.jiraIssueKey === highlightJiraIssueKey;
+            return (
             <li
               key={id}
-              className="rounded-xl border border-app-border bg-app-elevated/60 p-4 ring-1 ring-white/[0.04]"
+              className={`rounded-xl border bg-app-elevated/60 p-4 ring-1 transition-shadow ${
+                highlighted
+                  ? "border-app-accent/60 ring-app-accent/40 shadow-[0_0_0_1px_rgba(var(--app-accent-rgb,99,102,241),0.25)]"
+                  : "border-app-border ring-white/[0.04]"
+              }`}
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1 space-y-2">
@@ -973,7 +987,8 @@ export function TasksBoard({ projectKey, projectName }: TasksBoardProps) {
                 </label>
               </div>
             </li>
-          ))}
+            );
+          })}
         </ul>
       </div>
     </div>
