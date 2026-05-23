@@ -45,7 +45,7 @@ type AuthState = {
 type AuthContextValue = AuthState & {
   signInEmail: (email: string, password: string) => Promise<void>;
   signInGoogle: () => Promise<void>;
-  signUpEmail: (email: string, password: string, displayName: string, teamId: string, role: UserRole) => Promise<void>;
+  signUpEmail: (email: string, password: string, displayName: string) => Promise<void>;
   signOutUser: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
@@ -214,7 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [ensureProfileForUser]);
 
   const signUpEmail = useCallback(
-    async (email: string, password: string, displayName: string, teamId: string, role: UserRole) => {
+    async (email: string, password: string, displayName: string) => {
       setError(null);
       await assertEmailAllowedBeforeAuth(email);
       const auth = getFirebaseAuth();
@@ -229,9 +229,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const ref = doc(getFirestoreDb(), USERS_COLLECTION, uid);
       const now = serverTimestamp();
       await setDoc(ref, {
-        displayName: displayName.trim() || email.trim(),
-        role,
-        teamId: teamId.trim(),
+        displayName: displayName.trim() || emailLower,
+        role: "worker" satisfies UserRole,
+        teamId: "",
         emailLower,
         createdAt: now,
         updatedAt: now,

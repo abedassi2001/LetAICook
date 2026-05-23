@@ -12,6 +12,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 const inputClass = "app-input";
+const MIN_PASSWORD_LEN = 6;
 
 export function AuthForm() {
   const { signInEmail, signInGoogle, signUpEmail } = useAuth();
@@ -26,11 +27,17 @@ export function AuthForm() {
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [teamId, setTeamId] = useState("");
-  const [isTeamLead, setIsTeamLead] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function switchMode(mode: "signin" | "signup") {
+    setAuthMode(mode);
+    setError(null);
+    setPassword("");
+    setConfirmPassword("");
+  }
 
   async function handleGoogle() {
     setBusy(true);
@@ -55,13 +62,23 @@ export function AuthForm() {
         await signInEmail(email, password);
         goAfterSignIn();
         return;
-      } else {
-        if (!teamId.trim()) {
-          throw new Error("Team ID is required to create an account.");
-        }
-        await signUpEmail(email, password, displayName, teamId, isTeamLead ? "admin" : "worker");
       }
+
+      const name = displayName.trim();
+      if (!name) {
+        throw new Error("Enter your name.");
+      }
+      if (password.length < MIN_PASSWORD_LEN) {
+        throw new Error(`Password must be at least ${MIN_PASSWORD_LEN} characters.`);
+      }
+      if (password !== confirmPassword) {
+        throw new Error("Passwords do not match.");
+      }
+
+      await signUpEmail(email, password, name);
+      goAfterSignIn();
       setPassword("");
+      setConfirmPassword("");
     } catch (err) {
       setError(formatAuthError(err));
     } finally {
@@ -79,7 +96,7 @@ export function AuthForm() {
               ? "bg-app-accent text-app-on-accent shadow-sm"
               : "text-app-muted hover:text-app-text"
           }`}
-          onClick={() => setAuthMode("signin")}
+          onClick={() => switchMode("signin")}
         >
           Sign in
         </button>
@@ -90,7 +107,7 @@ export function AuthForm() {
               ? "bg-app-accent text-app-on-accent shadow-sm"
               : "text-app-muted hover:text-app-text"
           }`}
-          onClick={() => setAuthMode("signup")}
+          onClick={() => switchMode("signup")}
         >
           Sign up
         </button>
@@ -98,36 +115,16 @@ export function AuthForm() {
 
       <form className="space-y-4" onSubmit={(e) => void handleSubmit(e)}>
         {authMode === "signup" ? (
-          <>
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-app-muted">Name</span>
-              <input
-                className={inputClass}
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                required
-              />
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-app-muted">Team ID (Shared with your team)</span>
-              <input
-                className={inputClass}
-                value={teamId}
-                onChange={(e) => setTeamId(e.target.value)}
-                placeholder="e.g. startup-x"
-                required
-              />
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={isTeamLead}
-                onChange={(e) => setIsTeamLead(e.target.checked)}
-                className="h-4 w-4 rounded border-app-border bg-app-bg text-app-accent focus:ring-app-accent"
-              />
-              <span className="text-app-muted">I am the Team Lead (can assign tasks)</span>
-            </label>
-          </>
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-app-muted">Full name</span>
+            <input
+              className={inputClass}
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              autoComplete="name"
+              required
+            />
+          </label>
         ) : null}
         <label className="flex flex-col gap-1.5 text-sm">
           <span className="text-app-muted">Email</span>
@@ -141,7 +138,7 @@ export function AuthForm() {
           />
           {authMode === "signup" ? (
             <span className="text-xs text-app-muted">
-              Use an address your team lead added on a project, or a work email your team already registered.
+              Use an address your team lead added on a project, or one your team already registered.
             </span>
           ) : null}
         </label>
@@ -153,9 +150,24 @@ export function AuthForm() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
+            minLength={authMode === "signup" ? MIN_PASSWORD_LEN : undefined}
             autoComplete={authMode === "signin" ? "current-password" : "new-password"}
           />
         </label>
+        {authMode === "signup" ? (
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-app-muted">Confirm password</span>
+            <input
+              type="password"
+              className={inputClass}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              minLength={MIN_PASSWORD_LEN}
+              autoComplete="new-password"
+            />
+          </label>
+        ) : null}
 
         {error ? (
           <p className="rounded-lg border border-red-500/40 bg-red-950/40 px-3 py-2 text-sm text-red-300">{error}</p>
