@@ -2,7 +2,7 @@
 
 import { resolveReactFlow } from "@/lib/system-design/derive-flow";
 import type { SystemDesignBlueprint } from "@/lib/system-design/types";
-import { useCallback, useEffect, useMemo } from "react";
+import { memo, useCallback, useEffect, useMemo } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -21,7 +21,10 @@ type Props = {
   className?: string;
 };
 
-function DiagramCanvasImpl({ blueprint, className }: Props) {
+const DiagramCanvasImpl = memo(function DiagramCanvasImpl({
+  blueprint,
+  className,
+}: Props) {
   const sig = useMemo(() => JSON.stringify(blueprint), [blueprint]);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -65,12 +68,12 @@ function DiagramCanvasImpl({ blueprint, className }: Props) {
         <Controls className="!bg-app-elevated/90 !border-app-border !shadow-lg" />
         <MiniMap
           className="!bg-app-elevated/90 !border-app-border"
-          nodeColor={() => "rgba(52,211,153,0.5)"}
+          nodeColor="rgba(52,211,153,0.5)"
         />
       </ReactFlow>
     </div>
   );
-}
+});
 
 export function DiagramCanvasInner(props: Props) {
   return (

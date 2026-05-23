@@ -15,20 +15,20 @@ describe("parseDesignJson", () => {
     const r = parseDesignJson({
       project_name: "P",
       architecture_diagram: "graph LR\nX-->Y",
-      sequence_diagram: "seq",
+      sequence_diagram: "sequenceDiagram\nAlice->>Bob: hi",
     });
     expect(r.warnings.length).toBe(0);
-    expect(r.blueprint.diagrams.architecture).toBe("graph LR\nX-->Y");
-    expect(r.blueprint.diagrams.sequence).toBe("seq");
+    expect(r.blueprint.diagrams.architecture).toBe("flowchart LR\nX-->Y");
+    expect(r.blueprint.diagrams.sequence).toBe("sequenceDiagram\nAlice->>Bob: hi");
   });
 
   it("prefers nested diagrams over legacy flat keys", () => {
     const r = parseDesignJson({
       project_name: "P",
-      diagrams: { architecture: "nested" },
+      diagrams: { architecture: "flowchart LR\nN-->M" },
       architecture_diagram: "legacy",
     });
-    expect(r.blueprint.diagrams.architecture).toBe("nested");
+    expect(r.blueprint.diagrams.architecture).toBe("flowchart LR\nN-->M");
   });
 
   it("maps page key_components to components", () => {

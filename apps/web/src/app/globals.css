@@ -48,6 +48,38 @@ html {
   scroll-behavior: smooth;
 }
 
+/* Visible scrollbars on panels (System Designer, tables, diagrams) */
+.app-scrollbar {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--app-accent) 50%, var(--app-border)) var(--app-elevated);
+}
+
+.app-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.app-scrollbar::-webkit-scrollbar-track {
+  background: var(--app-elevated);
+  border-radius: 6px;
+}
+
+.app-scrollbar::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--app-accent) 45%, var(--app-border-bright));
+  border-radius: 6px;
+  border: 2px solid var(--app-elevated);
+}
+
+.app-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--app-accent-dim);
+}
+
+.app-scrollbar::-webkit-scrollbar-corner {
+  background: var(--app-elevated);
+}
+
 body {
   background: var(--app-bg);
   color: var(--app-text);

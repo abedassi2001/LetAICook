@@ -36,18 +36,18 @@ Keys:
 - api_routes: array of { "method": string, "route": string, "description": optional string }
 - use_cases: array of { "id": string, "actor": string, "goal": string, "steps": string[] }
 - relationships: array of { "from": string, "to": string, "label": string or null } (system/layer links)
-- diagrams: object with ONLY these string keys (Mermaid; may be ""):
-  - "architecture": flowchart or graph LR — clients, Next.js, FastAPI, Firestore, externals
+- diagrams: object with ONLY these string keys (raw Mermaid source only — no ``` fences; may be ""):
+  - "architecture": flowchart LR or flowchart TD — clients, Next.js, FastAPI, Firestore, externals
   - "sequence": sequenceDiagram — primary user journey
   - "erd": erDiagram — core entities
   - "class": classDiagram — main modules/domain
-  - "user_flow": flowchart — onboarding or core UX
+  - "user_flow": flowchart TD — onboarding or core UX
 - tasks: array of { "title": string, "description": string, "estimate_points": number or null }
 - wireframe_suggestions: string[]
 - react_flow_nodes: array of { "id": string, "position": { "x": number, "y": number }, "data": { "label": string } } (optional; may be [] if relationships define the graph)
 - react_flow_edges: array of { "id": string, "source": string, "target": string, "label": string or null }
 
-Use valid Mermaid. Keep labels short. Prefer meaningful relationships and concise diagrams over huge node lists.
+Use valid Mermaid 11 syntax. Start each diagram with the correct directive (flowchart, sequenceDiagram, erDiagram, classDiagram). Do not use deprecated `graph` — use `flowchart`. For flowchart nodes with parentheses or commas in the label, use quoted form: NodeId["Label (detail)"]. Example: Clients["Clients (Browser)"] --> API["FastAPI"]. Keep labels short. Prefer meaningful relationships and concise diagrams over huge node lists. Never put prose or JSON inside diagram fields.
 """
 
 

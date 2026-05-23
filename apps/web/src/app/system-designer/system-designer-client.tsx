@@ -427,7 +427,8 @@ export function SystemDesignerClient() {
         </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-4 lg:px-8 lg:py-6">
+      <div className="app-scrollbar min-h-0 flex-1">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4 lg:px-8 lg:py-6">
         {remoteNotice ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-500/30 bg-amber-950/25 px-4 py-3 text-sm text-amber-100 backdrop-blur-md">
             <span>
@@ -611,13 +612,13 @@ export function SystemDesignerClient() {
           <div className="rounded-xl border border-red-500/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">{error}</div>
         ) : null}
 
-        <div className="flex flex-wrap gap-2 border-b border-white/10 pb-2">
+        <div className="app-scrollbar flex gap-2 overflow-x-auto border-b border-white/10 pb-2">
           {TABS.map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`rounded-full px-4 py-1.5 text-sm capitalize transition-all duration-200 ${
+              className={`shrink-0 rounded-full px-4 py-1.5 text-sm capitalize transition-all duration-200 ${
                 tab === t
                   ? "bg-app-accent/20 text-app-accent ring-1 ring-app-accent/50"
                   : "text-app-muted hover:bg-white/5 hover:text-app-text"
@@ -720,6 +721,12 @@ export function SystemDesignerClient() {
                   <h3 className="mb-2 text-sm font-medium text-app-accent">Service map</h3>
                   <ServiceMap blueprint={d} />
                 </div>
+                {d.diagrams.architecture.trim() ? (
+                  <div className="md:col-span-2 rounded-2xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur-md">
+                    <h3 className="mb-2 text-sm font-medium text-app-accent">Architecture (preview)</h3>
+                    <MermaidChart chart={d.diagrams.architecture} />
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -749,8 +756,10 @@ export function SystemDesignerClient() {
             ) : null}
 
             {tab === "database" ? (
-              <div className="grid gap-6 lg:grid-cols-2">
-                <DatabaseViewer blueprint={d} />
+              <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+                <div className="app-scrollbar max-h-[min(70vh,720px)] overflow-y-auto pr-1">
+                  <DatabaseViewer blueprint={d} />
+                </div>
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md">
                   <h3 className="text-sm font-medium text-app-accent">ERD (Mermaid)</h3>
                   <MermaidChart chart={d.diagrams.erd} className="mt-3" />
@@ -759,7 +768,7 @@ export function SystemDesignerClient() {
             ) : null}
 
             {tab === "apis" ? (
-              <div className="overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-md">
+              <div className="app-scrollbar overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-md">
                 <table className="w-full text-left text-sm">
                   <thead className="border-b border-white/10 text-app-muted">
                     <tr>
@@ -929,7 +938,7 @@ export function SystemDesignerClient() {
                 Close
               </button>
             </div>
-            <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap p-4 text-sm text-app-muted">
+            <pre className="app-scrollbar max-h-[70vh] overflow-auto whitespace-pre-wrap p-4 text-sm text-app-muted">
               {extraMarkdown}
             </pre>
             <div className="border-t border-white/10 p-3">
@@ -944,6 +953,7 @@ export function SystemDesignerClient() {
           </div>
         </div>
       ) : null}
+      </div>
     </div>
   );
 }

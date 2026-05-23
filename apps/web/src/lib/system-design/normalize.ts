@@ -1,8 +1,14 @@
+import { sanitizeMermaidSource } from "@/lib/system-design/sanitize-mermaid";
 import {
   emptyBlueprint,
   type SystemDesignBlueprint,
   type SystemDesignDiagrams,
 } from "@/lib/system-design/types";
+
+function diagramStr(v: unknown, legacy?: unknown): string {
+  const raw = str(v) || str(legacy);
+  return raw ? sanitizeMermaidSource(raw) : "";
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -30,14 +36,17 @@ export function parseDesignJson(raw: unknown): {
 
   const diagramsIn = isRecord(raw.diagrams) ? raw.diagrams : null;
   const diagrams: SystemDesignDiagrams = {
-    architecture: str(diagramsIn?.architecture) || str(raw.architecture_diagram),
-    sequence: str(diagramsIn?.sequence) || str(raw.sequence_diagram),
-    erd: str(diagramsIn?.erd) || str(raw.erd_diagram),
-    class: str(diagramsIn?.class) || str(diagramsIn?.class_diagram) || str(raw.class_diagram),
-    user_flow:
-      str(diagramsIn?.user_flow) ||
-      str(diagramsIn?.user_flow_diagram) ||
-      str(raw.user_flow_diagram),
+    architecture: diagramStr(diagramsIn?.architecture, raw.architecture_diagram),
+    sequence: diagramStr(diagramsIn?.sequence, raw.sequence_diagram),
+    erd: diagramStr(diagramsIn?.erd, raw.erd_diagram),
+    class: diagramStr(
+      diagramsIn?.class ?? diagramsIn?.class_diagram,
+      raw.class_diagram,
+    ),
+    user_flow: diagramStr(
+      diagramsIn?.user_flow ?? diagramsIn?.user_flow_diagram,
+      raw.user_flow_diagram,
+    ),
   };
 
   const pagesRaw = Array.isArray(raw.pages) ? raw.pages : [];
