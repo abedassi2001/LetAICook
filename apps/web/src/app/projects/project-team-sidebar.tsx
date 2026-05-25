@@ -193,14 +193,6 @@ export function ProjectTeamSidebar({
     [user, profile],
   );
 
-  // TEMP debug: why "+ Add to Jira" is hidden (remove after investigation)
-  console.log({
-    isAdmin,
-    jiraAuth,
-    profileRole: profile?.role,
-    userEmail: user?.email,
-  });
-
   const manualCreds = useMemo(
     () => jiraCredentialsFromProfile(profile),
     [profile],
