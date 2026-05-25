@@ -26,6 +26,62 @@ export function readPlanningProjectDescription(): string {
   }
 }
 
+export function resolveSystemDesignerDescription(params: {
+  planningDescription: string;
+  planningSavedAtMs: number;
+  firestoreDescriptionDraft?: string;
+  firestoreDescriptionDraftManual?: boolean;
+  firestoreUpdatedAtMs?: number;
+}): {
+  description: string;
+  manualOverride: boolean;
+} {
+  const planningDescription = params.planningDescription.trim();
+  const firestoreDescriptionDraft =
+    params.firestoreDescriptionDraft?.trim() ?? "";
+  const firestoreUpdatedAtMs = params.firestoreUpdatedAtMs ?? 0;
+
+  if (!planningDescription) {
+    return {
+      description: firestoreDescriptionDraft,
+      manualOverride: params.firestoreDescriptionDraftManual === true,
+    };
+  }
+
+  if (!firestoreDescriptionDraft) {
+    return {
+      description: planningDescription,
+      manualOverride: false,
+    };
+  }
+
+  if (params.firestoreDescriptionDraftManual === true) {
+    return {
+      description: firestoreDescriptionDraft,
+      manualOverride: true,
+    };
+  }
+
+  if (params.firestoreDescriptionDraftManual === false) {
+    return {
+      description: planningDescription,
+      manualOverride: false,
+    };
+  }
+
+  if (params.planningSavedAtMs >= firestoreUpdatedAtMs) {
+    return {
+      description: planningDescription,
+      manualOverride: false,
+    };
+  }
+
+  return {
+    description: firestoreDescriptionDraft,
+    manualOverride: true,
+  };
+}
+
 export function readPlanningSessionSavedAt(): number {
   if (typeof window === "undefined") return 0;
   try {

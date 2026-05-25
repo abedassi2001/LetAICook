@@ -62,7 +62,7 @@ There is **no PostgreSQL or Redis** in this repo today; do not assume they are r
 |------|-------------|
 | **Tasks** | Firestore task board; admin publishes/assigns; worker sees assigned tasks and updates status. |
 | **Planning chat** | Multi-turn chat to **`POST /chat/plan`**; context stored in `sessionStorage` and summarized for the designer via `apps/web/src/lib/planning-sync.ts`. |
-| **System designer** | **`POST /design-project`** returns JSON; UI renders Mermaid, React Flow, tables; export PNG / JSON / Markdown; versions stored under **`users/{uid}/systemDesigns/workspace`**. |
+| **System designer** | **`POST /design-project`** returns JSON; the description field prefills from the latest planning summary when available, **Use planning summary** replaces the current draft, generation stays manual, and versions are stored under **`users/{uid}/systemDesigns/workspace`**. |
 
 Optional extras: **Jira-style backlog** and **pitch** markdown from **`POST /design-project/jira-tasks`** and **`/pitch`**.
 
@@ -142,7 +142,7 @@ Uses **`POST /chat/plan`** and **Gemini**. Prefer **`gemini-2.5-flash-lite`**; a
 
 ## AI System Designer (`/system-designer`)
 
-- **Input:** project description (typed or **synced from planning** until you edit the box); optional last messages sent as `context_messages` to the API.
+- **Input:** project description (typed, prefilled from the latest planning summary when available, or replaced via **Use planning summary**); optional last messages sent as `context_messages` to the API.
 - **Output:** structured JSON (diagrams, services, APIs, schema, relationships, React Flow, tasks). **Legacy** flat diagram fields in old snapshots are normalized in `apps/web/src/lib/system-design/normalize.ts`.
 - **Persistence:** Firestore doc **`users/{uid}/systemDesigns/workspace`** (requires **deployed rules** — see below).
 
