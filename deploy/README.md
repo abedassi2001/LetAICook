@@ -87,7 +87,7 @@ End users only click **Connect Jira** in Settings. They never enter `ATLASSIAN_C
 | `FRONTEND_BASE_URL` | `https://letaicook-web-…-uc.a.run.app` | Cloud Run web URL (OAuth return) |
 | `FIREBASE_PROJECT_ID` | `letaicook` | Verify Firebase ID tokens on API |
 
-**Atlassian Console:** Authorization → OAuth 2.0 (3LO) → callback URL above; scopes `read:jira-work`, `write:jira-work`, `read:jira-user`, `offline_access`.
+**Atlassian Console:** Authorization → OAuth 2.0 (3LO) → callback URL above; scopes `read:jira-work`, `write:jira-work`, `read:jira-user`, `manage:jira-configuration`, `offline_access`. After scope changes, users must **Disconnect** and **Connect Jira** again in Settings.
 
 **If teammates see “You don't have access to this app” / “application is in development” on production:** the OAuth app is still in development mode — only the Console owner can connect until you enable **Distribution** and add test users (or publish the app). Step-by-step: [`JIRA_OAUTH_DISTRIBUTION.md`](./JIRA_OAUTH_DISTRIBUTION.md).
 

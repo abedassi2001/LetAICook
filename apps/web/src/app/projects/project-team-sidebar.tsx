@@ -235,6 +235,7 @@ export function ProjectTeamSidebar({
     () => resolveJiraClientAuth(user, profile),
     [user, profile],
   );
+
   const manualCreds = useMemo(
     () => jiraCredentialsFromProfile(profile),
     [profile],

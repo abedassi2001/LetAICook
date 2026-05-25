@@ -395,6 +395,164 @@ def _issues_to_list_items(
     return results
 
 
+_ROLE_PREFERENCE = (
+    "Developers",
+    "Member",
+    "Members",
+    "Users",
+    "Team",
+    "Contributor",
+    "Service Desk Team",
+)
+
+
+def _search_jira_user_by_email(session: JiraSession, email: str) -> dict[str, Any] | None:
+    query = email.strip()
+    resp = session.get(
+        "/rest/api/3/user/search",
+        params={"query": query, "maxResults": 20},
+        timeout=15,
+    )
+    if resp.status_code == 401:
+        raise HTTPException(
+            status_code=502,
+            detail="Jira connection expired or invalid. Reconnect Jira in Settings.",
+        )
+    if resp.status_code == 403:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Your Jira connection does not have permission to look up users. "
+                "Ask a Jira administrator to grant access or add this person in Jira."
+            ),
+        )
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Jira user search failed ({resp.status_code}): {resp.text[:300]}",
+        )
+    users = resp.json()
+    if not isinstance(users, list) or not users:
+        return None
+    target = query.lower()
+    for user in users:
+        addr = (user.get("emailAddress") or "").lower()
+        if addr == target:
+            return user
+    return users[0]
+
+
+def _fetch_project_roles(session: JiraSession, project_key: str) -> dict[str, str]:
+    resp = session.get(f"/rest/api/3/project/{project_key}/role", timeout=15)
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"Jira project {project_key} was not found.")
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not load Jira project roles ({resp.status_code}): {resp.text[:300]}",
+        )
+    data = resp.json()
+    if not isinstance(data, dict) or not data:
+        raise HTTPException(
+            status_code=502,
+            detail="Jira returned no project roles for this project.",
+        )
+    return {str(name): str(url) for name, url in data.items()}
+
+
+def _pick_project_role(roles: dict[str, str]) -> tuple[str, str]:
+    for name in _ROLE_PREFERENCE:
+        if name in roles:
+            return name, roles[name]
+    for name, url in roles.items():
+        if name.lower() not in ("administrators", "administrator"):
+            return name, url
+    name, url = next(iter(roles.items()))
+    return name, url
+
+
+def _role_id_from_url(role_url: str) -> str:
+    return role_url.rstrip("/").split("/")[-1]
+
+
+def _add_teammate_to_jira_project(
+    session: JiraSession,
+    project_key: str,
+    email: str,
+    *,
+    display_name_hint: str | None = None,
+) -> AddProjectTeamMemberResponse:
+    user = _search_jira_user_by_email(session, email)
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No Jira user found for {email.strip()}. "
+                "They need an Atlassian account with access to this site."
+            ),
+        )
+
+    account_id = user.get("accountId")
+    if not account_id:
+        raise HTTPException(
+            status_code=502,
+            detail="Jira returned a user without an account id.",
+        )
+
+    display_name = (
+        user.get("displayName")
+        or display_name_hint
+        or user.get("emailAddress")
+        or email.strip()
+    )
+
+    roles = _fetch_project_roles(session, project_key)
+    role_name, role_url = _pick_project_role(roles)
+    role_id = _role_id_from_url(role_url)
+
+    resp = session.post(
+        f"/rest/api/3/project/{project_key}/role/{role_id}",
+        json={"user": [account_id]},
+        timeout=15,
+    )
+    if resp.status_code in (200, 201, 204):
+        return AddProjectTeamMemberResponse(
+            ok=True,
+            message=f"Added {display_name} to the {role_name} role in Jira project {project_key}.",
+            account_id=account_id,
+            display_name=display_name,
+            role_name=role_name,
+        )
+
+    body_lower = (resp.text or "").lower()
+    if resp.status_code == 400 and (
+        "already" in body_lower or "exists" in body_lower or "duplicate" in body_lower
+    ):
+        return AddProjectTeamMemberResponse(
+            ok=True,
+            message=f"{display_name} is already on Jira project {project_key} ({role_name} role).",
+            account_id=account_id,
+            display_name=display_name,
+            role_name=role_name,
+            already_member=True,
+        )
+
+    if resp.status_code in (401, 403):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Your Jira connection cannot add people to this project. "
+                "Reconnect Jira in Settings with an account that has Administer Projects "
+                "permission, or ask a Jira administrator to add this teammate."
+            ),
+        )
+
+    raise HTTPException(
+        status_code=502,
+        detail=f"Could not add user to Jira project ({resp.status_code}): {resp.text[:300]}",
+    )
+
+
 def _fetch_assignable_users(
     session: JiraSession, project_key: str, max_results: int = 50
 ) -> list[dict[str, Any]]:
