@@ -95,11 +95,21 @@ export type JiraProjectTeammate = {
   recent_issues: JiraTeammateIssue[];
 };
 
+export type JiraProjectMember = {
+  account_id: string | null;
+  display_name: string;
+  email: string | null;
+  avatar_url: string | null;
+  actor_type: "user" | "group";
+  roles: string[];
+};
+
 export type JiraProjectTeam = {
   project_key: string;
   project_name: string | null;
   project_lead: string | null;
   site_url: string | null;
+  project_members: JiraProjectMember[];
   teammates: JiraProjectTeammate[];
   unassigned_count: number;
 };

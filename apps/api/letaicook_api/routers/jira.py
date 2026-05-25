@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
@@ -177,11 +177,21 @@ class JiraProjectTeammate(BaseModel):
     recent_issues: list[JiraTeammateIssue] = Field(default_factory=list)
 
 
+class JiraProjectMember(BaseModel):
+    account_id: str | None = None
+    display_name: str
+    email: str | None = None
+    avatar_url: str | None = None
+    actor_type: Literal["user", "group"] = "user"
+    roles: list[str] = Field(default_factory=list)
+
+
 class JiraProjectTeam(BaseModel):
     project_key: str
     project_name: str | None = None
     project_lead: str | None = None
     site_url: str | None = None
+    project_members: list[JiraProjectMember] = Field(default_factory=list)
     teammates: list[JiraProjectTeammate] = Field(default_factory=list)
     unassigned_count: int = 0
 
@@ -488,6 +498,102 @@ def _role_id_from_url(role_url: str) -> str:
     return role_url.rstrip("/").split("/")[-1]
 
 
+def _role_detail_api_path(role_url: str, session: JiraSession) -> str:
+    """Normalize a Jira project role URL to a path for session.get."""
+    if role_url.startswith("/"):
+        return role_url
+    base = session.base_url.rstrip("/")
+    if role_url.startswith(base):
+        suffix = role_url[len(base) :]
+        return suffix if suffix.startswith("/") else f"/{suffix}"
+    marker = "/rest/api/"
+    pos = role_url.find(marker)
+    if pos >= 0:
+        return role_url[pos:]
+    return role_url
+
+
+_USER_ROLE_ACTOR = "atlassian-user-role-actor"
+_GROUP_ROLE_ACTOR = "atlassian-group-role-actor"
+
+
+def _fetch_project_role_detail(session: JiraSession, role_url: str) -> dict[str, Any] | None:
+    resp = session.get(_role_detail_api_path(role_url, session), timeout=15)
+    if resp.status_code != 200:
+        return None
+    data = resp.json()
+    return data if isinstance(data, dict) else None
+
+
+def _build_project_members(session: JiraSession, project_key: str) -> list[JiraProjectMember]:
+    """Users and groups assigned to Jira project roles (not issue workload)."""
+    try:
+        roles = _fetch_project_roles(session, project_key)
+    except HTTPException:
+        return []
+
+    merged: dict[str, JiraProjectMember] = {}
+
+    for role_name, role_url in roles.items():
+        detail = _fetch_project_role_detail(session, role_url)
+        if not detail:
+            continue
+        actors = detail.get("actors")
+        if not isinstance(actors, list):
+            continue
+
+        for actor in actors:
+            if not isinstance(actor, dict):
+                continue
+            actor_type = str(actor.get("type") or "")
+
+            if actor_type == _USER_ROLE_ACTOR:
+                actor_user = actor.get("actorUser")
+                if not isinstance(actor_user, dict):
+                    continue
+                account_id = actor_user.get("accountId")
+                if not account_id:
+                    continue
+                key = f"user:{account_id}"
+                if key not in merged:
+                    merged[key] = JiraProjectMember(
+                        account_id=account_id,
+                        display_name=actor.get("displayName") or account_id,
+                        actor_type="user",
+                    )
+                if role_name not in merged[key].roles:
+                    merged[key].roles.append(role_name)
+                continue
+
+            if actor_type == _GROUP_ROLE_ACTOR or "group" in actor_type:
+                actor_group = actor.get("actorGroup")
+                group_id = None
+                if isinstance(actor_group, dict):
+                    group_id = actor_group.get("groupId") or actor_group.get("name")
+                group_id = group_id or actor.get("name") or actor.get("displayName")
+                if not group_id:
+                    continue
+                key = f"group:{group_id}"
+                display_name = (
+                    actor.get("displayName")
+                    or (actor_group.get("displayName") if isinstance(actor_group, dict) else None)
+                    or (actor_group.get("name") if isinstance(actor_group, dict) else None)
+                    or str(group_id)
+                )
+                if key not in merged:
+                    merged[key] = JiraProjectMember(
+                        display_name=display_name,
+                        actor_type="group",
+                    )
+                if role_name not in merged[key].roles:
+                    merged[key].roles.append(role_name)
+
+    return sorted(
+        merged.values(),
+        key=lambda m: (m.actor_type != "user", m.display_name.lower()),
+    )
+
+
 def _add_teammate_to_jira_project(
     session: JiraSession,
     project_key: str,
@@ -627,12 +733,14 @@ def _build_project_team(
         members.values(),
         key=lambda m: (-m.active_count, -m.total_assigned, m.display_name.lower()),
     )
+    project_members = _build_project_members(session, project_key)
 
     return JiraProjectTeam(
         project_key=project_key,
         project_name=project_name,
         project_lead=project_lead,
         site_url=session.browse_base,
+        project_members=project_members,
         teammates=teammates,
         unassigned_count=unassigned,
     )

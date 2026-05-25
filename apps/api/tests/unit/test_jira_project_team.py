@@ -1,8 +1,10 @@
 """Jira project team aggregation."""
 
-from unittest.mock import MagicMock
-
-from letaicook_api.routers.jira import _build_project_team
+from letaicook_api.routers.jira import (
+    JiraProjectMember,
+    _build_project_members,
+    _build_project_team,
+)
 from letaicook_api.services.jira_session import JiraSession
 
 
@@ -16,8 +18,16 @@ def _session() -> JiraSession:
     )
 
 
+def _patch_empty_project_members(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._build_project_members",
+        lambda _s, _k: [],
+    )
+
+
 def test_build_project_team_aggregates_assignees(monkeypatch):
     session = _session()
+    _patch_empty_project_members(monkeypatch)
 
     monkeypatch.setattr(
         "letaicook_api.routers.jira._fetch_project_meta",
@@ -71,6 +81,7 @@ def test_build_project_team_aggregates_assignees(monkeypatch):
 def test_build_project_team_assignable_users_ignored_without_issues(monkeypatch):
     """Assignable users must not appear when the project has no assigned issues."""
     session = _session()
+    _patch_empty_project_members(monkeypatch)
 
     monkeypatch.setattr(
         "letaicook_api.routers.jira._fetch_project_meta",
@@ -104,6 +115,7 @@ def test_build_project_team_assignable_users_ignored_without_issues(monkeypatch)
 
 def test_build_project_team_includes_issue_assignee_not_in_assignable(monkeypatch):
     session = _session()
+    _patch_empty_project_members(monkeypatch)
 
     monkeypatch.setattr(
         "letaicook_api.routers.jira._fetch_project_meta",
@@ -143,3 +155,145 @@ def test_build_project_team_includes_issue_assignee_not_in_assignable(monkeypatc
     assert team.teammates[0].account_id == "acc-jamie"
     assert team.teammates[0].display_name == "Jamie"
     assert team.teammates[0].total_assigned == 1
+
+
+def test_build_project_members_dedupes_user_across_roles(monkeypatch):
+    session = _session()
+
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._fetch_project_roles",
+        lambda _s, _k: {
+            "Developers": "/rest/api/3/project/DEMO/role/1",
+            "Member": "/rest/api/3/project/DEMO/role/2",
+        },
+    )
+
+    def role_detail(_s, role_url: str):
+        actors = [
+            {
+                "type": "atlassian-user-role-actor",
+                "displayName": "Alex Cohen",
+                "actorUser": {"accountId": "acc-alex"},
+            }
+        ]
+        return {"actors": actors, "name": "Role"}
+
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._fetch_project_role_detail",
+        role_detail,
+    )
+
+    members = _build_project_members(session, "DEMO")
+    assert len(members) == 1
+    assert members[0].account_id == "acc-alex"
+    assert members[0].display_name == "Alex Cohen"
+    assert sorted(members[0].roles) == ["Developers", "Member"]
+
+
+def test_build_project_members_user_in_role_without_issues(monkeypatch):
+    session = _session()
+
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._fetch_project_meta",
+        lambda _s, _k: {"name": "Demo", "lead": None},
+    )
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._fetch_project_roles",
+        lambda _s, _k: {"Developers": "/rest/api/3/project/DEMO/role/1"},
+    )
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._fetch_project_role_detail",
+        lambda _s, _url: {
+            "actors": [
+                {
+                    "type": "atlassian-user-role-actor",
+                    "displayName": "Idle Member",
+                    "actorUser": {"accountId": "acc-idle"},
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._search_jira_issues",
+        lambda _s, _jql, _max, fields=None: [],
+    )
+
+    team = _build_project_team(session, "DEMO", 50)
+    assert len(team.project_members) == 1
+    assert team.project_members[0].account_id == "acc-idle"
+    assert team.teammates == []
+
+
+def test_build_project_members_parses_group_actor(monkeypatch):
+    session = _session()
+
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._fetch_project_roles",
+        lambda _s, _k: {"Developers": "/rest/api/3/project/DEMO/role/1"},
+    )
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._fetch_project_role_detail",
+        lambda _s, _url: {
+            "actors": [
+                {
+                    "type": "atlassian-group-role-actor",
+                    "displayName": "jira-developers",
+                    "actorGroup": {
+                        "groupId": "grp-1",
+                        "displayName": "jira-developers",
+                        "name": "jira-developers",
+                    },
+                }
+            ]
+        },
+    )
+
+    members = _build_project_members(session, "DEMO")
+    assert len(members) == 1
+    assert members[0].actor_type == "group"
+    assert members[0].account_id is None
+    assert members[0].display_name == "jira-developers"
+    assert members[0].roles == ["Developers"]
+
+
+def test_build_project_team_returns_members_and_workload(monkeypatch):
+    session = _session()
+
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._fetch_project_meta",
+        lambda _s, _k: {"name": "Demo", "lead": None},
+    )
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._build_project_members",
+        lambda _s, _k: [
+            JiraProjectMember(
+                account_id="acc-role",
+                display_name="Role User",
+                roles=["Developers"],
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "letaicook_api.routers.jira._search_jira_issues",
+        lambda _s, _jql, _max, fields=None: [
+            {
+                "key": "DEMO-1",
+                "fields": {
+                    "summary": "Task",
+                    "status": {"name": "To Do", "statusCategory": {"name": "To Do"}},
+                    "priority": None,
+                    "assignee": {
+                        "accountId": "acc-worker",
+                        "displayName": "Worker",
+                        "emailAddress": "w@example.com",
+                    },
+                },
+            },
+        ],
+    )
+
+    team = _build_project_team(session, "DEMO", 50)
+    assert len(team.project_members) == 1
+    assert team.project_members[0].account_id == "acc-role"
+    assert len(team.teammates) == 1
+    assert team.teammates[0].account_id == "acc-worker"
