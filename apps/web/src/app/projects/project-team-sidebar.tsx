@@ -6,6 +6,7 @@ import {
   fetchJiraProjectTeam,
   jiraCredentialsFromProfile,
   resolveJiraClientAuth,
+  type JiraProjectMember,
   type JiraProjectTeam,
   type JiraProjectTeammate,
 } from "@/lib/jira-client";
@@ -16,7 +17,7 @@ import {
   removeProjectMember,
   subscribeProjectMembers,
 } from "@/lib/project-members";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ProjectTeamSidebarProps = {
   projectKey: string;
@@ -37,6 +38,48 @@ function statusTone(status: string, category: string): string {
     return "bg-sky-500/15 text-sky-300 ring-sky-500/30";
   }
   return "bg-app-accent/10 text-app-accent ring-app-accent/25";
+}
+
+function JiraProjectMemberCard({ member }: { member: JiraProjectMember }) {
+  return (
+    <li className="flex items-start gap-3 rounded-xl border border-app-border/80 bg-app-bg/60 px-3 py-2.5 ring-1 ring-white/[0.03]">
+      {member.avatar_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={member.avatar_url}
+          alt=""
+          className="h-9 w-9 shrink-0 rounded-full ring-1 ring-white/10"
+        />
+      ) : (
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-500/25 to-app-accent/20 text-xs font-semibold text-app-text ring-1 ring-white/10">
+          {initials(member.display_name)}
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-app-text">{member.display_name}</p>
+        {member.email ? (
+          <p className="truncate text-xs text-app-muted">{member.email}</p>
+        ) : null}
+        {member.actor_type === "group" ? (
+          <span className="mt-1.5 inline-block rounded-md bg-app-elevated px-2 py-0.5 text-[10px] font-medium text-app-muted">
+            Group
+          </span>
+        ) : null}
+        {member.roles.length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {member.roles.map((role) => (
+              <span
+                key={role}
+                className="rounded-md bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-300/90"
+              >
+                {role}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </li>
+  );
 }
 
 function RosterMemberCard({
@@ -210,22 +253,30 @@ export function ProjectTeamSidebar({
     );
   }, [team, rosterEmails]);
 
+  const teamRequestIdRef = useRef(0);
+
   const loadTeam = useCallback(async () => {
+    const requestId = ++teamRequestIdRef.current;
+    setTeam(null);
+    setError(null);
     if (!jiraAuth) {
-      setTeam(null);
       setLoading(false);
       return;
     }
     setLoading(true);
-    setError(null);
     try {
       const data = await fetchJiraProjectTeam(jiraAuth, projectKey, 100, manualCreds);
+      if (requestId !== teamRequestIdRef.current) return;
+      if (data.project_key !== projectKey) return;
       setTeam(data);
     } catch (e) {
+      if (requestId !== teamRequestIdRef.current) return;
       setTeam(null);
       setError(e instanceof Error ? e.message : "Could not load team from Jira.");
     } finally {
-      setLoading(false);
+      if (requestId === teamRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [jiraAuth, projectKey, manualCreds]);
 
@@ -463,11 +514,11 @@ export function ProjectTeamSidebar({
           )}
         </div>
 
-        {/* Jira workload */}
-        <div className="border-t border-app-border/60 pt-4">
+        {/* Jira project members */}
+        <div className="mb-5 border-t border-app-border/60 pt-4">
           <div className="mb-2 flex items-center justify-between gap-2">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-app-muted">
-              Jira workload
+              Jira project members
             </h3>
             {isAdmin && jiraAuth ? (
               <button
@@ -482,14 +533,17 @@ export function ProjectTeamSidebar({
               </button>
             ) : null}
           </div>
+          <p className="mb-3 text-[11px] leading-relaxed text-app-muted">
+            People in Jira project roles on Atlassian (separate from letAIcook roster and
+            issue workload below).
+          </p>
           {showJiraAddForm && isAdmin && jiraAuth ? (
             <form
               onSubmit={(e) => void handleAddToJira(e)}
               className="mb-3 space-y-2 rounded-xl border border-app-border bg-app-bg/80 p-3 ring-1 ring-white/[0.03]"
             >
               <p className="text-[11px] leading-relaxed text-app-muted">
-                Adds this person to the Jira project in Atlassian (separate from the letAIcook
-                roster above).
+                Adds this person to the Jira project in Atlassian.
               </p>
               <label className="block text-xs text-app-muted">
                 Email
@@ -538,6 +592,51 @@ export function ProjectTeamSidebar({
               <a href="/settings" className="text-app-accent underline">
                 Settings
               </a>{" "}
+              to see project members from your site.
+            </p>
+          ) : loading ? (
+            <div className="flex justify-center py-8">
+              <div className="h-7 w-7 animate-spin rounded-full border-2 border-app-border border-t-app-accent" />
+            </div>
+          ) : error ? (
+            <p className="rounded-lg border border-red-500/30 bg-red-950/30 px-3 py-2 text-xs text-red-200">
+              {error}
+            </p>
+          ) : (team?.project_members?.length ?? 0) === 0 ? (
+            <p className="text-xs text-app-muted">
+              No Jira project role members found, or your connection cannot read project
+              roles.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {team?.project_members.map((member) => (
+                <JiraProjectMemberCard
+                  key={
+                    member.actor_type === "group"
+                      ? `group:${member.display_name}`
+                      : member.account_id ?? member.display_name
+                  }
+                  member={member}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Jira workload */}
+        <div className="border-t border-app-border/60 pt-4">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-app-muted">
+            Jira workload
+          </h3>
+          <p className="mb-3 text-[11px] leading-relaxed text-app-muted">
+            Assignees with open or recent issues in this Jira project.
+          </p>
+          {!jiraAuth ? (
+            <p className="text-xs text-app-muted">
+              Connect Jira in{" "}
+              <a href="/settings" className="text-app-accent underline">
+                Settings
+              </a>{" "}
               to see live issue counts from your board.
             </p>
           ) : loading ? (
@@ -548,30 +647,33 @@ export function ProjectTeamSidebar({
             <p className="rounded-lg border border-red-500/30 bg-red-950/30 px-3 py-2 text-xs text-red-200">
               {error}
             </p>
-          ) : jiraOnlyTeammates.length === 0 && !team?.unassigned_count ? (
-            <p className="text-xs text-app-muted">
-              All Jira assignees are on the roster above, or the project has no issues
-              yet.
-            </p>
-          ) : team ? (
+          ) : (
             <>
-              <ul className="space-y-3">
-                {jiraOnlyTeammates.map((member) => (
-                  <TeammateCard
-                    key={member.account_id ?? member.email ?? member.display_name}
-                    member={member}
-                    onSelectIssueKey={onSelectIssueKey}
-                  />
-                ))}
-              </ul>
-              {team.unassigned_count > 0 ? (
+              {jiraOnlyTeammates.length === 0 && !team?.unassigned_count ? (
+                <p className="text-xs text-app-muted">
+                  All Jira assignees are on the roster above, or the project has no
+                  issues yet.
+                </p>
+              ) : null}
+              {jiraOnlyTeammates.length > 0 ? (
+                <ul className="space-y-3">
+                  {jiraOnlyTeammates.map((member) => (
+                    <TeammateCard
+                      key={member.account_id ?? member.email ?? member.display_name}
+                      member={member}
+                      onSelectIssueKey={onSelectIssueKey}
+                    />
+                  ))}
+                </ul>
+              ) : null}
+              {team && team.unassigned_count > 0 ? (
                 <p className="mt-4 rounded-lg border border-amber-500/25 bg-amber-950/20 px-3 py-2 text-xs text-amber-100">
                   {team.unassigned_count} issue{team.unassigned_count === 1 ? "" : "s"}{" "}
                   in Jira have no assignee.
                 </p>
               ) : null}
             </>
-          ) : null}
+          )}
         </div>
       </div>
     </aside>
