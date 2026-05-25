@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/contexts/auth-context";
 import {
+  addJiraProjectTeamMember,
   fetchJiraProjectTeam,
   jiraCredentialsFromProfile,
   resolveJiraClientAuth,
@@ -178,10 +179,20 @@ export function ProjectTeamSidebar({
     text: string;
   } | null>(null);
 
+  const [showJiraAddForm, setShowJiraAddForm] = useState(false);
+  const [jiraAddEmail, setJiraAddEmail] = useState("");
+  const [jiraAddName, setJiraAddName] = useState("");
+  const [jiraAddBusy, setJiraAddBusy] = useState(false);
+  const [jiraAddMessage, setJiraAddMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
   const jiraAuth = useMemo(
     () => resolveJiraClientAuth(user, profile),
     [user, profile],
   );
+
   const manualCreds = useMemo(
     () => jiraCredentialsFromProfile(profile),
     [profile],
@@ -226,7 +237,7 @@ export function ProjectTeamSidebar({
 
   useEffect(() => {
     if (!user) {
-      setRoster([]);
+      queueMicrotask(() => setRoster([]));
       return;
     }
     const unsub = subscribeProjectMembers(
@@ -276,6 +287,36 @@ export function ProjectTeamSidebar({
       });
     } finally {
       setAddBusy(false);
+    }
+  }
+
+  async function handleAddToJira(e: React.FormEvent) {
+    e.preventDefault();
+    if (!jiraAuth || !isAdmin) return;
+    setJiraAddBusy(true);
+    setJiraAddMessage(null);
+    try {
+      const result = await addJiraProjectTeamMember(
+        jiraAuth,
+        projectKey,
+        {
+          email: jiraAddEmail.trim(),
+          displayName: jiraAddName.trim() || undefined,
+        },
+        manualCreds,
+      );
+      setJiraAddMessage({ type: "success", text: result.message });
+      setJiraAddEmail("");
+      setJiraAddName("");
+      setShowJiraAddForm(false);
+      await loadTeam();
+    } catch (err) {
+      setJiraAddMessage({
+        type: "error",
+        text: err instanceof Error ? err.message : "Could not add to Jira project.",
+      });
+    } finally {
+      setJiraAddBusy(false);
     }
   }
 
@@ -424,9 +465,73 @@ export function ProjectTeamSidebar({
 
         {/* Jira workload */}
         <div className="border-t border-app-border/60 pt-4">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-app-muted">
-            Jira workload
-          </h3>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-app-muted">
+              Jira workload
+            </h3>
+            {isAdmin && jiraAuth ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowJiraAddForm((v) => !v);
+                  setJiraAddMessage(null);
+                }}
+                className="rounded-lg border border-app-border px-2.5 py-1 text-[10px] font-semibold text-app-text transition-colors hover:border-app-accent hover:text-app-accent"
+              >
+                {showJiraAddForm ? "Cancel" : "+ Add to Jira"}
+              </button>
+            ) : null}
+          </div>
+          {showJiraAddForm && isAdmin && jiraAuth ? (
+            <form
+              onSubmit={(e) => void handleAddToJira(e)}
+              className="mb-3 space-y-2 rounded-xl border border-app-border bg-app-bg/80 p-3 ring-1 ring-white/[0.03]"
+            >
+              <p className="text-[11px] leading-relaxed text-app-muted">
+                Adds this person to the Jira project in Atlassian (separate from the letAIcook
+                roster above).
+              </p>
+              <label className="block text-xs text-app-muted">
+                Email
+                <input
+                  type="email"
+                  required
+                  value={jiraAddEmail}
+                  onChange={(e) => setJiraAddEmail(e.target.value)}
+                  placeholder="teammate@company.com"
+                  className="mt-1 w-full rounded-lg border border-app-border bg-app-elevated px-2.5 py-2 text-sm text-app-text placeholder:text-app-muted focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+                />
+              </label>
+              <label className="block text-xs text-app-muted">
+                Display name (optional)
+                <input
+                  type="text"
+                  value={jiraAddName}
+                  onChange={(e) => setJiraAddName(e.target.value)}
+                  placeholder="Alex Cohen"
+                  className="mt-1 w-full rounded-lg border border-app-border bg-app-elevated px-2.5 py-2 text-sm text-app-text placeholder:text-app-muted focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={jiraAddBusy}
+                className="w-full rounded-lg bg-app-accent py-2 text-xs font-semibold text-white hover:bg-app-accent/90 disabled:opacity-50"
+              >
+                {jiraAddBusy ? "Adding to Jira…" : "Add to Jira project"}
+              </button>
+            </form>
+          ) : null}
+          {jiraAddMessage ? (
+            <p
+              className={`mb-3 rounded-lg px-3 py-2 text-xs ${
+                jiraAddMessage.type === "success"
+                  ? "border border-emerald-500/30 bg-emerald-950/25 text-emerald-200"
+                  : "border border-red-500/30 bg-red-950/30 text-red-200"
+              }`}
+            >
+              {jiraAddMessage.text}
+            </p>
+          ) : null}
           {!jiraAuth ? (
             <p className="text-xs text-app-muted">
               Connect Jira in{" "}

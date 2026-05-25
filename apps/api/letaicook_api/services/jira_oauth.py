@@ -26,6 +26,7 @@ ATLASSIAN_SCOPES = [
     "read:jira-work",
     "write:jira-work",
     "read:jira-user",
+    "manage:jira-configuration",
     "offline_access",
 ]
 

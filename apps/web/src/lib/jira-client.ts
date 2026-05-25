@@ -334,6 +334,37 @@ export async function fetchJiraProjectTeam(
   );
 }
 
+export type AddJiraProjectMemberInput = {
+  email: string;
+  displayName?: string;
+};
+
+export type AddJiraProjectMemberResult = {
+  ok: boolean;
+  message: string;
+  account_id?: string | null;
+  display_name?: string | null;
+  role_name?: string | null;
+  already_member?: boolean;
+};
+
+export async function addJiraProjectTeamMember(
+  auth: JiraClientAuth,
+  projectKey: string,
+  body: AddJiraProjectMemberInput,
+  manualCreds?: JiraCredentials | null,
+): Promise<AddJiraProjectMemberResult> {
+  return jiraRequest<AddJiraProjectMemberResult>(
+    auth,
+    `/jira/projects/${encodeURIComponent(projectKey)}/team`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+    manualCreds,
+  );
+}
+
 export async function createJiraIssue(
   auth: JiraClientAuth,
   input: CreateJiraIssueInput,

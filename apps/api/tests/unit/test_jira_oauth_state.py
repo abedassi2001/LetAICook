@@ -43,7 +43,8 @@ def test_build_authorize_url_includes_required_scopes(monkeypatch: pytest.Monkey
     scope_value = query["scope"][0]
     assert scope_value == jira_oauth.ATLASSIAN_SCOPE_PARAM
     assert scope_value == (
-        "read:jira-work write:jira-work read:jira-user offline_access"
+        "read:jira-work write:jira-work read:jira-user "
+        "manage:jira-configuration offline_access"
     )
     for required in jira_oauth.ATLASSIAN_SCOPES:
         assert required in scope_value.split()
