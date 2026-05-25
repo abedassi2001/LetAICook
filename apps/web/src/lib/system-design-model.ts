@@ -16,6 +16,7 @@ export type SystemDesignVersion = {
 export type SystemDesignWorkspaceDoc = {
   ownerUid: string;
   descriptionDraft: string;
+  descriptionDraftManual?: boolean;
   latest: SystemDesignRawSnapshot | null;
   versions: SystemDesignVersion[];
   updatedAt: Timestamp;

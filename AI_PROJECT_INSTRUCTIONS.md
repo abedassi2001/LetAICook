@@ -43,8 +43,8 @@ These are the current repo conventions. If you change them, **update this file**
 | **Server AI** | **Google Gemini** only in this repo: `GOOGLE_API_KEY` or `GEMINI_API_KEY` on `apps/api`; optional `GEMINI_MODEL`, `GEMINI_MODEL_FALLBACKS`. Used for `/chat/plan`, `/design-project`, and related endpoints. |
 | **Users in Firestore** | Profiles under `users/{uid}` with `role`: `admin` \| `worker` (see `user-model.ts`). Tied to Firebase Auth uid. |
 | **Tasks in Firestore** | Documents under `projects/{projectId}/tasks/{taskId}`. Demo project id: `DEMO_PROJECT_ID` in `task-model.ts`. |
-| **System Designer** | Workspace doc `users/{uid}/systemDesigns/workspace` — AI-generated snapshots + version history (`system-design-model.ts`). Client normalizes API/import JSON in `apps/web/src/lib/system-design/`. |
-| **Planning → Designer** | `apps/web/src/lib/planning-sync.ts` — user messages summarized for the designer description; custom event for live sync until the user edits the description field. |
+| **System Designer** | Workspace doc `users/{uid}/systemDesigns/workspace` — `descriptionDraft`, optional `descriptionDraftManual`, AI-generated snapshots + version history (`system-design-model.ts`). Client normalizes API/import JSON in `apps/web/src/lib/system-design/`. |
+| **Planning → Designer** | `apps/web/src/lib/planning-sync.ts` — user messages summarized for the designer description; `/system-designer` prefills from the latest planning summary when available, and **Use planning summary** lets the user replace the current draft without auto-running generation. |
 | **Planning chat (Firestore)** | `users/{uid}/planningChat/current` — message array + `updatedAt` (`planning-chat-model.ts`). |
 | **Task fields** | `task-model.ts`: includes `publishedByUid`, `assigneeUid`, `dueAt`, `completedAt`, `completedByUid`, status, priority, times, `jiraIssueKey`. **Change types, UI, and `firebase/firestore.rules` together.** |
 | **Firebase config (web)** | `apps/web/.env.local` — copy from `apps/web/firebase.web.env.sample`. Never commit secrets. Cloud Firebase is the default; emulators only when `NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true`. |
@@ -121,6 +121,7 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 | 2026-05-16 | **Jira integration:** Per-user Jira Cloud credentials in `users/{uid}` (Settings). FastAPI `/jira/*` proxy: create, update, delete, transition, batch, sync-status. Web `jira-client.ts`; `/tasks` syncs Firestore tasks with Jira when linked (`jiraIssueKey`). Optional server env in `api.env.sample`. |
 | 2026-05-19 | **Architecture UML:** `Plan/letAIcook_Architecture_UML.md` — Mermaid diagrams for deployment, Firestore model, auth, planning, designer, tasks, Jira, and API routes (matches current Firebase + FastAPI + Gemini stack). |
 | 2026-05-19 | **Auth email policy:** Sign-in/sign-up only for emails on `authAllowlist` (synced from project roster + user profiles) or existing `users/{uid}` profiles; blocks disposable domains and invalid formats. Deploy **`firebase/firestore.rules`**. Admins opening a project board backfill roster emails into the allowlist. |
+| 2026-05-25 | **Planning → Designer handoff:** `/system-designer` now prefers the latest planning summary unless the designer description was explicitly saved as a manual override; users can click **Use planning summary** to replace the current draft; generation remains manual via **Generate system design**. |
 
 *(Append a one-line note here whenever this file or Firebase setup changes materially.)*
 

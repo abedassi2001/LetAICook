@@ -19,6 +19,8 @@ import {
   PLANNING_CONTEXT_KEY,
   PLANNING_SYNC_EVENT,
   readPlanningProjectDescription,
+  readPlanningSessionSavedAt,
+  resolveSystemDesignerDescription,
 } from "@/lib/planning-sync";
 import { parseDesignJson } from "@/lib/system-design/normalize";
 import { emptyBlueprint } from "@/lib/system-design/types";
@@ -76,6 +78,7 @@ export function SystemDesignerClient() {
   const { user, profile } = useAuth();
   const [tab, setTab] = useState<TabId>("overview");
   const [description, setDescription] = useState("");
+  const [planningDescription, setPlanningDescription] = useState("");
   const [design, setDesign] = useState<SystemDesignRawSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,8 +92,8 @@ export function SystemDesignerClient() {
   const descriptionLive = useRef("");
   const designLive = useRef<SystemDesignRawSnapshot | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
-  /** Once the user edits the description box, we stop auto-overwriting from planning (until "Pull from planning"). */
-  const descriptionUserEdited = useRef(false);
+  /** Once the user types in the description box, we stop auto-overwriting from planning. */
+  const descriptionManualOverride = useRef(false);
   const descriptionFocused = useRef(false);
   const descriptionSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [descriptionSaveState, setDescriptionSaveState] = useState<
@@ -113,7 +116,7 @@ export function SystemDesignerClient() {
       SYSTEM_DESIGNS_COLLECTION,
       SYSTEM_DESIGN_WORKSPACE_ID,
     );
-  }, [user?.uid]);
+  }, [user]);
 
   useEffect(() => {
     descriptionLive.current = description;
@@ -122,6 +125,20 @@ export function SystemDesignerClient() {
   useEffect(() => {
     designLive.current = design;
   }, [design]);
+
+  const refreshPlanningDescription = useCallback(() => {
+    const next = readPlanningProjectDescription().trim();
+    setPlanningDescription(next);
+    return next;
+  }, []);
+
+  const applyPlanningDescription = useCallback((next: string) => {
+    const trimmed = next.trim();
+    if (!trimmed) return;
+    descriptionManualOverride.current = false;
+    setDescription(trimmed);
+    setDescriptionSaveState("idle");
+  }, []);
 
   const persistWorkspace = useCallback(
     async (snap: SystemDesignRawSnapshot, desc: string, note?: string) => {
@@ -147,6 +164,7 @@ export function SystemDesignerClient() {
         {
           ownerUid: user.uid,
           descriptionDraft: desc,
+          descriptionDraftManual: descriptionManualOverride.current,
           latest: clean,
           versions: versionsNext,
           updatedAt: serverTimestamp(),
@@ -161,7 +179,7 @@ export function SystemDesignerClient() {
   );
 
   const persistDescriptionDraft = useCallback(
-    async (desc: string) => {
+    async (desc: string, manualOverride = descriptionManualOverride.current) => {
       if (!user || !workspaceRef) return;
       setDescriptionSaveState("saving");
       try {
@@ -173,6 +191,7 @@ export function SystemDesignerClient() {
           {
             ownerUid: user.uid,
             descriptionDraft: desc,
+            descriptionDraftManual: manualOverride,
             updatedAt: serverTimestamp(),
             updatedAtIso: new Date().toISOString(),
           },
@@ -212,19 +231,26 @@ export function SystemDesignerClient() {
       const shouldLoadDescription =
         hydratedUid.current !== user.uid &&
         !descriptionFocused.current &&
-        !descriptionUserEdited.current;
+        !descriptionManualOverride.current;
+
+      const latestPlanningDescription = refreshPlanningDescription();
 
       if (shouldLoadDescription) {
-        if (d?.descriptionDraft?.trim()) {
-          setDescription(d.descriptionDraft);
-          descriptionUserEdited.current = true;
-        } else {
-          const fromPlanning = readPlanningProjectDescription();
-          if (fromPlanning.trim()) {
-            setDescription(fromPlanning);
-            descriptionUserEdited.current = false;
-          }
+        const resolved = resolveSystemDesignerDescription({
+          planningDescription: latestPlanningDescription,
+          planningSavedAtMs: readPlanningSessionSavedAt(),
+          firestoreDescriptionDraft: d?.descriptionDraft,
+          firestoreDescriptionDraftManual: d?.descriptionDraftManual,
+          firestoreUpdatedAtMs:
+            d?.updatedAt && typeof (d.updatedAt as Timestamp).toMillis === "function"
+              ? (d.updatedAt as Timestamp).toMillis()
+              : 0,
+        });
+
+        if (resolved.description) {
+          setDescription(resolved.description);
         }
+        descriptionManualOverride.current = resolved.manualOverride;
       }
 
       if (hydratedUid.current !== user.uid) {
@@ -274,27 +300,44 @@ export function SystemDesignerClient() {
       cancelled = true;
       unsub?.();
     };
-  }, [workspaceRef, user?.uid]);
+  }, [refreshPlanningDescription, workspaceRef, user?.uid]);
+
+  useEffect(() => {
+    if (user?.uid) return;
+    if (hydratedUid.current === "__anon__") return;
+    const latestPlanningDescription = refreshPlanningDescription();
+    if (
+      latestPlanningDescription &&
+      !descriptionFocused.current &&
+      !descriptionManualOverride.current
+    ) {
+      setDescription(latestPlanningDescription);
+    }
+    hydratedUid.current = "__anon__";
+  }, [refreshPlanningDescription, user?.uid]);
 
   useEffect(() => {
     function onPlanningSync() {
-      if (descriptionUserEdited.current || descriptionFocused.current) return;
-      const next = readPlanningProjectDescription();
-      if (next.trim()) setDescription(next);
+      const next = refreshPlanningDescription();
+      if (descriptionManualOverride.current || descriptionFocused.current) return;
+      if (next) {
+        setDescription(next);
+      }
     }
     window.addEventListener(PLANNING_SYNC_EVENT, onPlanningSync);
+    onPlanningSync();
     return () => window.removeEventListener(PLANNING_SYNC_EVENT, onPlanningSync);
-  }, []);
+  }, [refreshPlanningDescription]);
 
   useEffect(() => {
-    if (!descriptionUserEdited.current || !user || descriptionFocused.current) {
+    if (!descriptionManualOverride.current || !user || descriptionFocused.current) {
       return;
     }
     if (descriptionSaveTimer.current) {
       clearTimeout(descriptionSaveTimer.current);
     }
     descriptionSaveTimer.current = setTimeout(() => {
-      void persistDescriptionDraft(description);
+      void persistDescriptionDraft(description, true);
     }, 1500);
     return () => {
       if (descriptionSaveTimer.current) {
@@ -452,7 +495,8 @@ export function SystemDesignerClient() {
                   const data = cur.data() as SystemDesignWorkspaceDoc | undefined;
                   if (data?.descriptionDraft?.trim()) {
                     setDescription(data.descriptionDraft);
-                    descriptionUserEdited.current = true;
+                    descriptionManualOverride.current =
+                      data.descriptionDraftManual === true;
                   }
                   if (data?.latest) setDesign(data.latest);
                   if (data?.versions) setVersions(data.versions);
@@ -487,23 +531,28 @@ export function SystemDesignerClient() {
                 type="button"
                 className="text-xs font-medium text-app-accent hover:underline"
                 onClick={() => {
-                  descriptionUserEdited.current = true;
-                  void persistDescriptionDraft(description);
+                  descriptionManualOverride.current = true;
+                  void persistDescriptionDraft(description, true);
                 }}
               >
                 Save description
               </button>
-              <button
-                type="button"
-                className="text-xs font-medium text-app-accent hover:underline"
-                onClick={() => {
-                  descriptionUserEdited.current = false;
-                  const t = readPlanningProjectDescription();
-                  if (t.trim()) setDescription(t);
-                }}
-              >
-                Pull latest from planning
-              </button>
+              {planningDescription ? (
+                <button
+                  type="button"
+                  className="text-xs font-medium text-app-accent hover:underline"
+                  onClick={() => {
+                    const next = refreshPlanningDescription();
+                    if (!next) return;
+                    applyPlanningDescription(next);
+                    if (user) {
+                      void persistDescriptionDraft(next, false);
+                    }
+                  }}
+                >
+                  Use planning summary
+                </button>
+              ) : null}
             </div>
           </div>
           <textarea
@@ -512,20 +561,22 @@ export function SystemDesignerClient() {
             value={description}
             onFocus={() => {
               descriptionFocused.current = true;
-              descriptionUserEdited.current = true;
             }}
             onBlur={() => {
               descriptionFocused.current = false;
-              if (user) void persistDescriptionDraft(description);
+              if (user && descriptionManualOverride.current) {
+                void persistDescriptionDraft(description, true);
+              }
             }}
             onChange={(e) => {
-              descriptionUserEdited.current = true;
+              descriptionManualOverride.current = true;
               setDescriptionSaveState("idle");
               setDescription(e.target.value);
             }}
           />
           <p className="mt-1 text-[11px] text-app-muted">
-            Editable anytime — streams from planning only until you change this field. Uses server{" "}
+            Prefills from your latest planning summary when available. Once you edit this field,
+            live planning sync pauses until you click <span className="text-app-accent/90">Use planning summary</span>. Uses server{" "}
             <code className="rounded bg-app-elevated px-1">GOOGLE_API_KEY</code> /{" "}
             <code className="rounded bg-app-elevated px-1">GEMINI_API_KEY</code> (same as{" "}
             <code className="rounded bg-app-elevated px-1">/chat/plan</code>).
