@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/contexts/auth-context";
 import {
+  addJiraProjectTeamMember,
   fetchJiraProjectTeam,
   jiraCredentialsFromProfile,
   resolveJiraClientAuth,
@@ -15,7 +16,7 @@ import {
   removeProjectMember,
   subscribeProjectMembers,
 } from "@/lib/project-members";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ProjectTeamSidebarProps = {
   projectKey: string;
@@ -178,6 +179,15 @@ export function ProjectTeamSidebar({
     text: string;
   } | null>(null);
 
+  const [showJiraAddForm, setShowJiraAddForm] = useState(false);
+  const [jiraAddEmail, setJiraAddEmail] = useState("");
+  const [jiraAddName, setJiraAddName] = useState("");
+  const [jiraAddBusy, setJiraAddBusy] = useState(false);
+  const [jiraAddMessage, setJiraAddMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
   const jiraAuth = useMemo(
     () => resolveJiraClientAuth(user, profile),
     [user, profile],
@@ -199,22 +209,30 @@ export function ProjectTeamSidebar({
     );
   }, [team, rosterEmails]);
 
+  const teamRequestIdRef = useRef(0);
+
   const loadTeam = useCallback(async () => {
+    const requestId = ++teamRequestIdRef.current;
+    setTeam(null);
+    setError(null);
     if (!jiraAuth) {
-      setTeam(null);
       setLoading(false);
       return;
     }
     setLoading(true);
-    setError(null);
     try {
       const data = await fetchJiraProjectTeam(jiraAuth, projectKey, 100, manualCreds);
+      if (requestId !== teamRequestIdRef.current) return;
+      if (data.project_key !== projectKey) return;
       setTeam(data);
     } catch (e) {
+      if (requestId !== teamRequestIdRef.current) return;
       setTeam(null);
       setError(e instanceof Error ? e.message : "Could not load team from Jira.");
     } finally {
-      setLoading(false);
+      if (requestId === teamRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [jiraAuth, projectKey, manualCreds]);
 
@@ -226,7 +244,7 @@ export function ProjectTeamSidebar({
 
   useEffect(() => {
     if (!user) {
-      setRoster([]);
+      queueMicrotask(() => setRoster([]));
       return;
     }
     const unsub = subscribeProjectMembers(
@@ -276,6 +294,36 @@ export function ProjectTeamSidebar({
       });
     } finally {
       setAddBusy(false);
+    }
+  }
+
+  async function handleAddToJira(e: React.FormEvent) {
+    e.preventDefault();
+    if (!jiraAuth || !isAdmin) return;
+    setJiraAddBusy(true);
+    setJiraAddMessage(null);
+    try {
+      const result = await addJiraProjectTeamMember(
+        jiraAuth,
+        projectKey,
+        {
+          email: jiraAddEmail.trim(),
+          displayName: jiraAddName.trim() || undefined,
+        },
+        manualCreds,
+      );
+      setJiraAddMessage({ type: "success", text: result.message });
+      setJiraAddEmail("");
+      setJiraAddName("");
+      setShowJiraAddForm(false);
+      await loadTeam();
+    } catch (err) {
+      setJiraAddMessage({
+        type: "error",
+        text: err instanceof Error ? err.message : "Could not add to Jira project.",
+      });
+    } finally {
+      setJiraAddBusy(false);
     }
   }
 
@@ -424,9 +472,73 @@ export function ProjectTeamSidebar({
 
         {/* Jira workload */}
         <div className="border-t border-app-border/60 pt-4">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-app-muted">
-            Jira workload
-          </h3>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-app-muted">
+              Jira workload
+            </h3>
+            {isAdmin && jiraAuth ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowJiraAddForm((v) => !v);
+                  setJiraAddMessage(null);
+                }}
+                className="rounded-lg border border-app-border px-2.5 py-1 text-[10px] font-semibold text-app-text transition-colors hover:border-app-accent hover:text-app-accent"
+              >
+                {showJiraAddForm ? "Cancel" : "+ Add to Jira"}
+              </button>
+            ) : null}
+          </div>
+          {showJiraAddForm && isAdmin && jiraAuth ? (
+            <form
+              onSubmit={(e) => void handleAddToJira(e)}
+              className="mb-3 space-y-2 rounded-xl border border-app-border bg-app-bg/80 p-3 ring-1 ring-white/[0.03]"
+            >
+              <p className="text-[11px] leading-relaxed text-app-muted">
+                Adds this person to the Jira project in Atlassian (separate from the
+                letAIcook roster above).
+              </p>
+              <label className="block text-xs text-app-muted">
+                Email
+                <input
+                  type="email"
+                  required
+                  value={jiraAddEmail}
+                  onChange={(e) => setJiraAddEmail(e.target.value)}
+                  placeholder="teammate@company.com"
+                  className="mt-1 w-full rounded-lg border border-app-border bg-app-elevated px-2.5 py-2 text-sm text-app-text placeholder:text-app-muted focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+                />
+              </label>
+              <label className="block text-xs text-app-muted">
+                Display name (optional)
+                <input
+                  type="text"
+                  value={jiraAddName}
+                  onChange={(e) => setJiraAddName(e.target.value)}
+                  placeholder="Alex Cohen"
+                  className="mt-1 w-full rounded-lg border border-app-border bg-app-elevated px-2.5 py-2 text-sm text-app-text placeholder:text-app-muted focus:border-app-accent focus:outline-none focus:ring-1 focus:ring-app-accent"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={jiraAddBusy}
+                className="w-full rounded-lg bg-app-accent py-2 text-xs font-semibold text-white hover:bg-app-accent/90 disabled:opacity-50"
+              >
+                {jiraAddBusy ? "Adding to Jira…" : "Add to Jira project"}
+              </button>
+            </form>
+          ) : null}
+          {jiraAddMessage ? (
+            <p
+              className={`mb-3 rounded-lg px-3 py-2 text-xs ${
+                jiraAddMessage.type === "success"
+                  ? "border border-emerald-500/30 bg-emerald-950/25 text-emerald-200"
+                  : "border border-red-500/30 bg-red-950/30 text-red-200"
+              }`}
+            >
+              {jiraAddMessage.text}
+            </p>
+          ) : null}
           {!jiraAuth ? (
             <p className="text-xs text-app-muted">
               Connect Jira in{" "}
@@ -443,30 +555,33 @@ export function ProjectTeamSidebar({
             <p className="rounded-lg border border-red-500/30 bg-red-950/30 px-3 py-2 text-xs text-red-200">
               {error}
             </p>
-          ) : jiraOnlyTeammates.length === 0 && !team?.unassigned_count ? (
-            <p className="text-xs text-app-muted">
-              All Jira assignees are on the roster above, or the project has no issues
-              yet.
-            </p>
-          ) : team ? (
+          ) : (
             <>
-              <ul className="space-y-3">
-                {jiraOnlyTeammates.map((member) => (
-                  <TeammateCard
-                    key={member.account_id ?? member.email ?? member.display_name}
-                    member={member}
-                    onSelectIssueKey={onSelectIssueKey}
-                  />
-                ))}
-              </ul>
-              {team.unassigned_count > 0 ? (
+              {jiraOnlyTeammates.length === 0 && !team?.unassigned_count ? (
+                <p className="text-xs text-app-muted">
+                  All Jira assignees are on the roster above, or the project has no
+                  issues yet.
+                </p>
+              ) : null}
+              {jiraOnlyTeammates.length > 0 ? (
+                <ul className="space-y-3">
+                  {jiraOnlyTeammates.map((member) => (
+                    <TeammateCard
+                      key={member.account_id ?? member.email ?? member.display_name}
+                      member={member}
+                      onSelectIssueKey={onSelectIssueKey}
+                    />
+                  ))}
+                </ul>
+              ) : null}
+              {team && team.unassigned_count > 0 ? (
                 <p className="mt-4 rounded-lg border border-amber-500/25 bg-amber-950/20 px-3 py-2 text-xs text-amber-100">
                   {team.unassigned_count} issue{team.unassigned_count === 1 ? "" : "s"}{" "}
                   in Jira have no assignee.
                 </p>
               ) : null}
             </>
-          ) : null}
+          )}
         </div>
       </div>
     </aside>
