@@ -1,5 +1,6 @@
 "use client";
 
+import { MarkdownContent } from "@/components/markdown-content";
 import { DatabaseViewer } from "@/components/system-design/database-viewer";
 import { DiagramCanvas } from "@/components/system-design/diagram-canvas";
 import { ExportToolbar } from "@/components/system-design/export-toolbar";
@@ -16,11 +17,18 @@ import {
   resolveJiraClientAuth,
 } from "@/lib/jira-client";
 import {
+  PLANNING_CHAT_COLLECTION,
+  PLANNING_CHAT_DOC_ID,
+  parsePlanningMessages,
+} from "@/lib/planning-chat-model";
+import {
   PLANNING_CONTEXT_KEY,
   PLANNING_SYNC_EVENT,
   readPlanningProjectDescription,
   readPlanningSessionSavedAt,
   resolveSystemDesignerDescription,
+  writePlanningHandoffSession,
+  writePlanningSessionSavedAt,
 } from "@/lib/planning-sync";
 import { parseDesignJson } from "@/lib/system-design/normalize";
 import { emptyBlueprint } from "@/lib/system-design/types";
@@ -95,6 +103,8 @@ export function SystemDesignerClient() {
   /** Once the user types in the description box, we stop auto-overwriting from planning. */
   const descriptionManualOverride = useRef(false);
   const descriptionFocused = useRef(false);
+  const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [descriptionFieldActive, setDescriptionFieldActive] = useState(false);
   const descriptionSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [descriptionSaveState, setDescriptionSaveState] = useState<
     "idle" | "saving" | "saved" | "error"
@@ -118,6 +128,55 @@ export function SystemDesignerClient() {
     );
   }, [user]);
 
+  const planningChatRef = useMemo(() => {
+    if (!user?.uid) return null;
+    return doc(
+      getFirestoreDb(),
+      "users",
+      user.uid,
+      PLANNING_CHAT_COLLECTION,
+      PLANNING_CHAT_DOC_ID,
+    );
+  }, [user]);
+
+  useEffect(() => {
+    if (!planningChatRef || !user?.uid) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const snap = await getDoc(planningChatRef);
+        if (cancelled || !snap.exists()) return;
+
+        const data = snap.data();
+        const msgs = parsePlanningMessages(data.messages);
+        if (!msgs?.length) return;
+
+        const fsSummary =
+          typeof data.projectSummary === "string" ? data.projectSummary.trim() : "";
+        const rawTs = data.updatedAt as Timestamp | undefined;
+        const fsMs = typeof rawTs?.toMillis === "function" ? rawTs.toMillis() : 0;
+        const sessionAt = readPlanningSessionSavedAt();
+        if (fsMs > 0 && sessionAt > fsMs) return;
+
+        writePlanningHandoffSession({
+          messages: msgs,
+          projectSummary: fsSummary || undefined,
+          ownerUid: user.uid,
+        });
+        if (fsMs > 0) {
+          writePlanningSessionSavedAt(Math.max(readPlanningSessionSavedAt(), fsMs));
+        }
+      } catch {
+        /* offline / rules */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [planningChatRef, user?.uid]);
+
   useEffect(() => {
     descriptionLive.current = description;
   }, [description]);
@@ -136,6 +195,8 @@ export function SystemDesignerClient() {
     const trimmed = next.trim();
     if (!trimmed) return;
     descriptionManualOverride.current = false;
+    setDescriptionFieldActive(false);
+    descriptionFocused.current = false;
     setDescription(trimmed);
     setDescriptionSaveState("idle");
   }, []);
@@ -553,33 +614,98 @@ export function SystemDesignerClient() {
                   Use planning summary
                 </button>
               ) : null}
+              {!descriptionFieldActive && description.trim() ? (
+                <button
+                  type="button"
+                  className="text-xs font-medium text-app-accent hover:underline"
+                  onClick={() => {
+                    setDescriptionFieldActive(true);
+                    descriptionFocused.current = true;
+                    requestAnimationFrame(() => descriptionInputRef.current?.focus());
+                  }}
+                >
+                  Edit
+                </button>
+              ) : null}
             </div>
           </div>
-          <textarea
-            className="mt-2 min-h-[120px] w-full resize-y rounded-xl border border-app-border bg-black/30 px-4 py-3 text-[15px] text-app-text placeholder:text-app-muted/50 focus:border-app-accent/60 focus:outline-none focus:ring-1 focus:ring-app-accent/30"
-            placeholder="e.g. Car park app with live occupancy, payments, and admin dashboard…"
-            value={description}
-            onFocus={() => {
-              descriptionFocused.current = true;
-            }}
-            onBlur={() => {
-              descriptionFocused.current = false;
-              if (user && descriptionManualOverride.current) {
-                void persistDescriptionDraft(description, true);
-              }
-            }}
-            onChange={(e) => {
-              descriptionManualOverride.current = true;
-              setDescriptionSaveState("idle");
-              setDescription(e.target.value);
-            }}
-          />
+          {descriptionFieldActive ? (
+            <textarea
+              ref={descriptionInputRef}
+              className="mt-2 min-h-[120px] w-full resize-y rounded-xl border border-app-border bg-black/30 px-4 py-3 text-[15px] text-app-text placeholder:text-app-muted/50 focus:border-app-accent/60 focus:outline-none focus:ring-1 focus:ring-app-accent/30"
+              placeholder="e.g. Car park app with live occupancy, payments, and admin dashboard…"
+              value={description}
+              onFocus={() => {
+                descriptionFocused.current = true;
+                setDescriptionFieldActive(true);
+              }}
+              onBlur={() => {
+                descriptionFocused.current = false;
+                setDescriptionFieldActive(false);
+                if (user && descriptionManualOverride.current) {
+                  void persistDescriptionDraft(description, true);
+                }
+              }}
+              onChange={(e) => {
+                descriptionManualOverride.current = true;
+                setDescriptionSaveState("idle");
+                setDescription(e.target.value);
+              }}
+            />
+          ) : description.trim() ? (
+            <div
+              role="button"
+              tabIndex={0}
+              aria-label="Edit project description"
+              className="mt-2 min-h-[120px] w-full cursor-text rounded-xl border border-app-border bg-black/20 px-1 py-1 text-left transition hover:border-app-accent/30 focus:border-app-accent/60 focus:outline-none focus:ring-1 focus:ring-app-accent/30"
+              onClick={() => {
+                setDescriptionFieldActive(true);
+                descriptionFocused.current = true;
+                requestAnimationFrame(() => descriptionInputRef.current?.focus());
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setDescriptionFieldActive(true);
+                  descriptionFocused.current = true;
+                  requestAnimationFrame(() => descriptionInputRef.current?.focus());
+                }
+              }}
+            >
+              <MarkdownContent className="px-3 py-2">{description}</MarkdownContent>
+            </div>
+          ) : (
+            <div
+              role="button"
+              tabIndex={0}
+              aria-label="Add project description"
+              className="mt-2 flex min-h-[120px] w-full cursor-text items-start rounded-xl border border-dashed border-app-border bg-black/20 px-4 py-3 text-[15px] text-app-muted/50 transition hover:border-app-accent/30"
+              onClick={() => {
+                setDescriptionFieldActive(true);
+                descriptionFocused.current = true;
+                requestAnimationFrame(() => descriptionInputRef.current?.focus());
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setDescriptionFieldActive(true);
+                  descriptionFocused.current = true;
+                  requestAnimationFrame(() => descriptionInputRef.current?.focus());
+                }
+              }}
+            >
+              e.g. Car park app with live occupancy, payments, and admin dashboard…
+            </div>
+          )}
+          {!descriptionFieldActive && description.trim() ? (
+            <p className="mt-1 text-[11px] text-app-muted">Click the description to edit raw text.</p>
+          ) : null}
           <p className="mt-1 text-[11px] text-app-muted">
             Prefills from your latest planning summary when available. Once you edit this field,
             live planning sync pauses until you click <span className="text-app-accent/90">Use planning summary</span>. Uses server{" "}
             <code className="rounded bg-app-elevated px-1">GOOGLE_API_KEY</code> /{" "}
             <code className="rounded bg-app-elevated px-1">GEMINI_API_KEY</code> (same as{" "}
-            <code className="rounded bg-app-elevated px-1">/chat/plan</code>).
+            <code className="rounded bg-app-elevated px-1">/chat/plan/summary</code>).
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -744,9 +870,9 @@ export function SystemDesignerClient() {
                       </label>
                     </div>
                   ) : d.description ? (
-                    <p className="mt-2 whitespace-pre-wrap text-sm text-app-muted">
+                    <MarkdownContent className="mt-2 text-sm text-app-muted">
                       {d.description}
-                    </p>
+                    </MarkdownContent>
                   ) : (
                     <p className="mt-2 text-sm italic text-app-muted">
                       No generated summary yet — use the project description above and generate.
@@ -944,9 +1070,9 @@ export function SystemDesignerClient() {
                         </label>
                       </div>
                     ) : (
-                      <p className="mt-2 whitespace-pre-wrap text-sm text-app-muted">
+                      <MarkdownContent className="mt-2 text-sm text-app-muted">
                         {t.description || "No description"}
-                      </p>
+                      </MarkdownContent>
                     )}
                   </div>
                 ))}
@@ -989,9 +1115,9 @@ export function SystemDesignerClient() {
                 Close
               </button>
             </div>
-            <pre className="app-scrollbar max-h-[70vh] overflow-auto whitespace-pre-wrap p-4 text-sm text-app-muted">
-              {extraMarkdown}
-            </pre>
+            <div className="app-scrollbar max-h-[70vh] overflow-auto p-4">
+              <MarkdownContent>{extraMarkdown}</MarkdownContent>
+            </div>
             <div className="border-t border-white/10 p-3">
               <button
                 type="button"

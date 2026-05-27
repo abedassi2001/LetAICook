@@ -1,18 +1,16 @@
 "use client";
 
+import { MarkdownContent } from "@/components/markdown-content";
 import { useAuth } from "@/contexts/auth-context";
 import { getPublicApiBaseUrl } from "@/lib/api-base";
 import { getFirestoreDb } from "@/lib/firebase";
 import {
-  PLANNING_CONTEXT_KEY,
-  PLANNING_PROJECT_DESCRIPTION_KEY,
-  PLANNING_SYNC_EVENT,
-  buildProjectDescriptionFromMessages,
   clearPlanningSessionStorage,
+  fetchPlanningProjectSummary,
+  hasPlanningUserInput,
   readPlanningSessionOwnerUid,
   readPlanningSessionSavedAt,
-  writePlanningSessionOwnerUid,
-  writePlanningSessionSavedAt,
+  writePlanningHandoffSession,
 } from "@/lib/planning-sync";
 import {
   PLANNING_CHAT_COLLECTION,
@@ -27,14 +25,17 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const FIRESTORE_DEBOUNCE_MS = 800;
+const SUMMARY_DEBOUNCE_MS = 2000;
 
 export function PlanningChat() {
   const { user } = useAuth();
   const [messages, setMessages] = useState<PlanningChatMessage[] | null>(null);
+  const [projectSummary, setProjectSummary] = useState<string | undefined>(undefined);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const summaryGenerationRef = useRef(0);
 
   const planningRef = useMemo(() => {
     if (!user) return null;
@@ -65,6 +66,7 @@ export function PlanningChat() {
       }
 
       let chosen: PlanningChatMessage[] = sessionMsgs ?? [PLANNING_INTRO_MESSAGE];
+      let chosenSummary: string | undefined;
 
       if (user) {
         const ref = doc(
@@ -81,6 +83,8 @@ export function PlanningChat() {
           if (snap.exists()) {
             const data = snap.data();
             const fsMsgs = parsePlanningMessages(data.messages);
+            const fsSummary =
+              typeof data.projectSummary === "string" ? data.projectSummary.trim() : "";
             const rawTs = data.updatedAt as { toMillis?: () => number } | undefined;
             const fsMs = typeof rawTs?.toMillis === "function" ? rawTs.toMillis() : 0;
 
@@ -89,6 +93,7 @@ export function PlanningChat() {
                 chosen = sessionMsgs;
               } else {
                 chosen = fsMsgs;
+                if (fsSummary) chosenSummary = fsSummary;
               }
             } else if (sessionMsgs && sessionMsgs.length > 0) {
               chosen = sessionMsgs;
@@ -104,7 +109,13 @@ export function PlanningChat() {
       }
 
       if (!cancelled) {
+        setProjectSummary(chosenSummary);
         setMessages(chosen);
+        writePlanningHandoffSession({
+          messages: chosen,
+          projectSummary: chosenSummary,
+          ownerUid: user ? user.uid : "__anon__",
+        });
       }
     }
 
@@ -124,21 +135,32 @@ export function PlanningChat() {
 
   useEffect(() => {
     if (messages === null) return;
-    try {
-      sessionStorage.setItem(PLANNING_CONTEXT_KEY, JSON.stringify(messages));
-      writePlanningSessionSavedAt(Date.now());
-      if (user) {
-        writePlanningSessionOwnerUid(user.uid);
-      } else {
-        writePlanningSessionOwnerUid("__anon__");
-      }
-      const desc = buildProjectDescriptionFromMessages(messages);
-      sessionStorage.setItem(PLANNING_PROJECT_DESCRIPTION_KEY, desc);
-      window.dispatchEvent(new Event(PLANNING_SYNC_EVENT));
-    } catch {
-      /* private mode / quota */
-    }
-  }, [messages, user]);
+    writePlanningHandoffSession({
+      messages,
+      projectSummary,
+      ownerUid: user ? user.uid : "__anon__",
+    });
+  }, [messages, projectSummary, user]);
+
+  useEffect(() => {
+    if (messages === null || !hasPlanningUserInput(messages)) return;
+
+    const generation = ++summaryGenerationRef.current;
+    const id = window.setTimeout(() => {
+      void (async () => {
+        let summary = "";
+        try {
+          summary = await fetchPlanningProjectSummary(messages);
+        } catch {
+          return;
+        }
+        if (generation !== summaryGenerationRef.current) return;
+        setProjectSummary(summary);
+      })();
+    }, SUMMARY_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(id);
+  }, [messages]);
 
   useEffect(() => {
     if (messages === null || !user || !planningRef) return;
@@ -148,25 +170,37 @@ export function PlanningChat() {
         {
           ownerUid: user.uid,
           messages,
+          ...(projectSummary ? { projectSummary } : {}),
           updatedAt: serverTimestamp(),
         },
         { merge: true },
       );
     }, FIRESTORE_DEBOUNCE_MS);
     return () => window.clearTimeout(id);
-  }, [messages, user, planningRef]);
+  }, [messages, projectSummary, user, planningRef]);
 
   function newConversation() {
+    summaryGenerationRef.current += 1;
     clearPlanningSessionStorage();
+    setProjectSummary(undefined);
     setMessages([PLANNING_INTRO_MESSAGE]);
     setInput("");
     setError(null);
+    writePlanningHandoffSession({
+      messages: [PLANNING_INTRO_MESSAGE],
+      ownerUid: user ? user.uid : "__anon__",
+    });
     if (user && planningRef) {
-      void setDoc(planningRef, {
-        ownerUid: user.uid,
-        messages: [PLANNING_INTRO_MESSAGE],
-        updatedAt: serverTimestamp(),
-      });
+      void setDoc(
+        planningRef,
+        {
+          ownerUid: user.uid,
+          messages: [PLANNING_INTRO_MESSAGE],
+          projectSummary: "",
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
     }
   }
 
@@ -276,14 +310,18 @@ export function PlanningChat() {
                     m.role === "user" ? "text-right" : "text-left"
                   }`}
                 >
-                  <div
+                    <div
                     className={`inline-block max-w-[min(100%,42rem)] rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
                       m.role === "user"
                         ? "glass-panel text-app-text ring-1 ring-app-accent/20"
                         : "text-app-text"
                     }`}
                   >
-                    <div className="whitespace-pre-wrap">{m.content}</div>
+                    {m.role === "assistant" ? (
+                      <MarkdownContent compact>{m.content}</MarkdownContent>
+                    ) : (
+                      <div className="whitespace-pre-wrap text-left">{m.content}</div>
+                    )}
                   </div>
                 </div>
               </motion.div>

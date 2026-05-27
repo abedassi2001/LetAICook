@@ -49,6 +49,58 @@ class ChatPlanResponse(BaseModel):
     message: str
 
 
+class ChatPlanSummaryRequest(BaseModel):
+    messages: list[ChatMessageIn] = Field(
+        ...,
+        min_length=1,
+        max_length=40,
+        description="Full planning conversation to condense for System Designer.",
+    )
+
+
+class ChatPlanSummaryResponse(BaseModel):
+    summary: str
+
+
+PLANNING_SUMMARY_PROMPT = """You write concise project descriptions for letAIcook's System Designer handoff.
+
+Read the planning conversation (user and assistant). Produce a clear summary (roughly 150–450 words) that a system architect can use to generate architecture.
+
+Include when discussed:
+- Product goal and target users
+- Core features and workflows
+- Technical stack, integrations, or constraints mentioned
+- Milestones, risks, or delivery cadence
+- How work maps to letAIcook (admins assign tasks; workers execute)
+
+Use short paragraphs and bullet lists where helpful. Plain text only — no code fences, no preamble like "Here is a summary".
+Do not invent requirements that were not discussed. If the conversation is thin, summarize what exists and note open questions briefly."""
+
+
+def _format_messages_for_summary(messages: list[ChatMessageIn]) -> str:
+    lines: list[str] = []
+    for m in messages:
+        label = "User" if m.role == "user" else "Assistant"
+        lines.append(f"{label}:\n{m.content.strip()}\n")
+    return "\n".join(lines).strip()
+
+
+def _run_plan_summary(*, api_key: str, model_name: str, transcript: str) -> str:
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name=model_name)
+    response = model.generate_content(
+        [
+            PLANNING_SUMMARY_PROMPT,
+            "Conversation:\n\n" + transcript,
+        ],
+        generation_config=genai.GenerationConfig(temperature=0.4),
+    )
+    text = response.text or ""
+    if not text.strip():
+        raise HTTPException(status_code=502, detail="Empty summary from AI.")
+    return text.strip()
+
+
 def _run_plan_chat(
     *,
     api_key: str,
@@ -137,6 +189,54 @@ def chat_plan(body: ChatPlanRequest):
                 f"All Gemini models exhausted quota ({', '.join(candidates)}): {last_error!s}. "
                 "Enable billing or use a project with free-tier access for these models."
             ),
+        ) from last_error
+
+    raise HTTPException(status_code=502, detail="No Gemini model configured.")
+
+
+@router.post("/chat/plan/summary", response_model=ChatPlanSummaryResponse)
+def chat_plan_summary(body: ChatPlanSummaryRequest):
+    """Condense a planning conversation into a System Designer project description."""
+    api_key = google_api_key()
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "AI is not configured: set GOOGLE_API_KEY (or GEMINI_API_KEY) on the API "
+                "service — use a key from Google AI Studio."
+            ),
+        )
+
+    transcript = _format_messages_for_summary(body.messages)
+    candidates = plan_model_candidates()
+    last_error: GoogleAPIError | None = None
+
+    for i, model_name in enumerate(candidates):
+        try:
+            summary = _run_plan_summary(
+                api_key=api_key,
+                model_name=model_name,
+                transcript=transcript,
+            )
+            return ChatPlanSummaryResponse(summary=summary)
+        except HTTPException:
+            raise
+        except GoogleAPIError as e:
+            last_error = e
+            if is_quota_exhausted(e) and i < len(candidates) - 1:
+                continue
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Upstream AI error ({model_name}): {e!s}. "
+                    f"Tried: {', '.join(candidates[: i + 1])}."
+                ),
+            ) from e
+
+    if last_error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"All Gemini models exhausted quota ({', '.join(candidates)}): {last_error!s}.",
         ) from last_error
 
     raise HTTPException(status_code=502, detail="No Gemini model configured.")

@@ -17,7 +17,7 @@ The app should support **visibility of project status** so the build stays coord
 
 **Primary data & hosting goal:** use **Firebase** (Firestore for tasks, user profiles, and system designer workspace data; Auth for sign-in) with the **project owner’s Firebase account**. Do not introduce a second database or hosting story for core task/designer data unless the product owner explicitly changes this document.
 
-**Planning chat persistence:** `sessionStorage` for same-tab handoff to **System Designer** + **`users/{uid}/planningChat/current`** in Firestore when signed in (see `planning-sync.ts`, `planning-chat-model.ts`). Deploy rules after pull.
+**Planning chat persistence:** `sessionStorage` for same-tab handoff to **System Designer** + **`users/{uid}/planningChat/current`** in Firestore when signed in (`messages`, optional **`projectSummary`**, `updatedAt` — see `planning-sync.ts`, `planning-chat-model.ts`). Summary via FastAPI **`POST /chat/plan/summary`**. Deploy rules after pull.
 
 ---
 
@@ -44,8 +44,8 @@ These are the current repo conventions. If you change them, **update this file**
 | **Users in Firestore** | Profiles under `users/{uid}` with `role`: `admin` \| `worker` (see `user-model.ts`). Tied to Firebase Auth uid. |
 | **Tasks in Firestore** | Documents under `projects/{projectId}/tasks/{taskId}`. Demo project id: `DEMO_PROJECT_ID` in `task-model.ts`. |
 | **System Designer** | Workspace doc `users/{uid}/systemDesigns/workspace` — `descriptionDraft`, optional `descriptionDraftManual`, AI-generated snapshots + version history (`system-design-model.ts`). Client normalizes API/import JSON in `apps/web/src/lib/system-design/`. |
-| **Planning → Designer** | `apps/web/src/lib/planning-sync.ts` — user messages summarized for the designer description; `/system-designer` prefills from the latest planning summary when available, and **Use planning summary** lets the user replace the current draft without auto-running generation. |
-| **Planning chat (Firestore)** | `users/{uid}/planningChat/current` — message array + `updatedAt` (`planning-chat-model.ts`). |
+| **Planning → Designer** | `apps/web/src/lib/planning-sync.ts` — Gemini summary (`POST /chat/plan/summary`) stored as `projectSummary` and mirrored to session; client fallback only when summary missing; `/system-designer` prefills unless `descriptionDraftManual`; **Use planning summary** replaces the draft without auto-generating. |
+| **Planning chat (Firestore)** | `users/{uid}/planningChat/current` — `messages[]`, optional `projectSummary`, `updatedAt` (`planning-chat-model.ts`). |
 | **Task fields** | `task-model.ts`: includes `publishedByUid`, `assigneeUid`, `dueAt`, `completedAt`, `completedByUid`, status, priority, times, `jiraIssueKey`. **Change types, UI, and `firebase/firestore.rules` together.** |
 | **Firebase config (web)** | `apps/web/.env.local` — copy from `apps/web/firebase.web.env.sample`. Never commit secrets. Cloud Firebase is the default; emulators only when `NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true`. |
 | **FastAPI base URL (web)** | `apps/web/src/lib/api-base.ts` — `NEXT_PUBLIC_API_BASE_URL`, or `NEXT_PUBLIC_USE_SAME_ORIGIN_API_PROXY` + build-time `LETAICOOK_API_PROXY_TARGET`, or `NEXT_PUBLIC_API_FOLLOW_WEB_HOST` + `NEXT_PUBLIC_API_PORT`. See root README. |
@@ -122,6 +122,7 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 | 2026-05-19 | **Architecture UML:** `Plan/letAIcook_Architecture_UML.md` — Mermaid diagrams for deployment, Firestore model, auth, planning, designer, tasks, Jira, and API routes (matches current Firebase + FastAPI + Gemini stack). |
 | 2026-05-19 | **Auth email policy:** Sign-in/sign-up only for emails on `authAllowlist` (synced from project roster + user profiles) or existing `users/{uid}` profiles; blocks disposable domains and invalid formats. Deploy **`firebase/firestore.rules`**. Admins opening a project board backfill roster emails into the allowlist. |
 | 2026-05-25 | **Planning → Designer handoff:** `/system-designer` now prefers the latest planning summary unless the designer description was explicitly saved as a manual override; users can click **Use planning summary** to replace the current draft; generation remains manual via **Generate system design**. |
+| 2026-05-19 | **Planning summary:** `POST /chat/plan/summary` (Gemini) + Firestore `users/{uid}/planningChat/current.projectSummary`; session handoff via `writePlanningHandoffSession`; client fallback in `buildPlanningDescriptionFallback` when API/summary unavailable. |
 
 *(Append a one-line note here whenever this file or Firebase setup changes materially.)*
 
