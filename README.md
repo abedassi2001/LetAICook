@@ -114,6 +114,8 @@ To enforce this before merge (recommended for startup-style branch hygiene), set
 3. Select checks from this workflow (API tests + Web tests/build)
 4. Save rule
 
+Tip: a tiny docs-only commit to `main` should still trigger this workflow so you can quickly verify checks appear and run in GitHub Actions.
+
 ---
 
 ## Environment variables (summary)
