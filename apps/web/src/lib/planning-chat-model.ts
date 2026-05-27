@@ -21,6 +21,8 @@ export const PLANNING_CHAT_DOC_ID = "current";
 export type PlanningChatFirestoreDoc = {
   ownerUid: string;
   messages: PlanningChatMessage[];
+  /** Gemini-generated handoff text for System Designer (optional on older docs). */
+  projectSummary?: string;
   updatedAt: Timestamp;
 };
 
