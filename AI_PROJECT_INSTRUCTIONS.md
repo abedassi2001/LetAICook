@@ -123,6 +123,7 @@ If instructions are ambiguous, **ask** rather than inventing product behavior.
 | 2026-05-19 | **Auth email policy:** Sign-in/sign-up only for emails on `authAllowlist` (synced from project roster + user profiles) or existing `users/{uid}` profiles; blocks disposable domains and invalid formats. Deploy **`firebase/firestore.rules`**. Admins opening a project board backfill roster emails into the allowlist. |
 | 2026-05-25 | **Planning → Designer handoff:** `/system-designer` now prefers the latest planning summary unless the designer description was explicitly saved as a manual override; users can click **Use planning summary** to replace the current draft; generation remains manual via **Generate system design**. |
 | 2026-05-19 | **Planning summary:** `POST /chat/plan/summary` (Gemini) + Firestore `users/{uid}/planningChat/current.projectSummary`; session handoff via `writePlanningHandoffSession`; client fallback in `buildPlanningDescriptionFallback` when API/summary unavailable. |
+| 2026-05-27 | **GitHub CI quality gate:** added `.github/workflows/ci-pr-checks.yml` (PR/push to `main`): `apps/api` `pytest -q`, `apps/web` `npm run test` + `npm run build`; combine with branch protection required checks on `main`. |
 
 *(Append a one-line note here whenever this file or Firebase setup changes materially.)*
 

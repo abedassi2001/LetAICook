@@ -100,6 +100,20 @@ Deploy so teammates and customers can open your **Cloud Run web** URL (see `depl
 
 Full steps, GitHub Actions CI, and secrets: **[`deploy/README.md`](./deploy/README.md)**.
 
+### PR quality gate (CI)
+
+This repo has a PR workflow at **`.github/workflows/ci-pr-checks.yml`** that runs on every pull request to `main`:
+
+- `apps/api`: `pytest -q`
+- `apps/web`: `npm run test` and `npm run build`
+
+To enforce this before merge (recommended for startup-style branch hygiene), set branch protection:
+
+1. GitHub repo → **Settings** → **Branches** → **Add rule** for `main`
+2. Enable **Require status checks to pass before merging**
+3. Select checks from this workflow (API tests + Web tests/build)
+4. Save rule
+
 ---
 
 ## Environment variables (summary)
