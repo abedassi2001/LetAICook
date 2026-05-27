@@ -40,6 +40,15 @@ jobs:
   web-tests:
     name: Web tests and build
     runs-on: ubuntu-latest
+    env:
+      # CI placeholders so Next build does not fail on missing Firebase env.
+      NEXT_PUBLIC_FIREBASE_API_KEY: ci-firebase-api-key
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci-project.firebaseapp.com
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci-project
+      NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ci-project.firebasestorage.app
+      NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
+      NEXT_PUBLIC_FIREBASE_APP_ID: "1:1234567890:web:abcdef123456"
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
     defaults:
       run:
         working-directory: apps/web
